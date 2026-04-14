@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronRight, LogOut, Shield, Moon, Globe, Volume2, Mail } from 'lucide-react-native';
+import { ChevronRight, LogOut, Shield, Moon, Globe, Volume2, Mail, Wallet, Repeat, RefreshCw } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
+import { router } from 'expo-router';
 import { supabase } from '../../lib/supabase/client';
 import { getUserProfile, type UserProfile } from '../../lib/api/client';
 import { useSession } from '../../lib/hooks/useSession';
@@ -130,8 +131,8 @@ export default function Profile() {
           )}
         </Card>
 
-        {/* Risk snapshot */}
-        <Card padding={0} style={{ marginBottom: 24, overflow: 'hidden' }}>
+        {/* Risk snapshot + retake */}
+        <Card padding={0} style={{ marginBottom: 16, overflow: 'hidden' }}>
           <View className="flex-row items-center px-5 pt-4 pb-2 gap-2">
             <Shield size={14} color={t.textSecondary} />
             <Text
@@ -141,7 +142,7 @@ export default function Profile() {
               Risk profile
             </Text>
           </View>
-          <View className="px-5 pb-5 flex-row items-end justify-between">
+          <View className="px-5 pb-4 flex-row items-end justify-between">
             <Text className="text-2xl font-bold" style={{ color: t.textPrimary }}>
               {profile?.risk_category ?? 'Not assessed'}
             </Text>
@@ -150,6 +151,42 @@ export default function Profile() {
               <Text className="text-xs" style={{ color: t.textSecondary }}>/50</Text>
             </Text>
           </View>
+          <Pressable
+            onPress={() => router.push('/risk-assessment')}
+            className="flex-row items-center justify-between px-5 py-3.5"
+            style={{ borderTopWidth: 1, borderTopColor: t.border, backgroundColor: t.brand + '08' }}
+          >
+            <View className="flex-row items-center gap-2">
+              <RefreshCw size={14} color={t.brand} />
+              <Text className="text-[13px] font-semibold" style={{ color: t.brand }}>
+                Retake assessment
+              </Text>
+            </View>
+            <ChevronRight size={16} color={t.brand} />
+          </Pressable>
+        </Card>
+
+        {/* Portfolio actions */}
+        <Text
+          className="text-[10px] font-bold uppercase tracking-widest mb-2 ml-1"
+          style={{ color: t.textSecondary }}
+        >
+          Portfolio
+        </Text>
+        <Card padding={0} style={{ marginBottom: 24, overflow: 'hidden' }}>
+          <SettingRow
+            icon={<Wallet size={18} color={t.brand} />}
+            title="My Orders"
+            value="Lumpsum purchases & status"
+            onPress={() => router.push('/orders')}
+          />
+          <Divider />
+          <SettingRow
+            icon={<Repeat size={18} color={t.brand} />}
+            title="My SIPs"
+            value="Active & pending SIPs"
+            onPress={() => router.push('/sips')}
+          />
         </Card>
 
         <Text

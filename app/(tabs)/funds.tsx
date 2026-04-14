@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, X } from 'lucide-react-native';
+import { router } from 'expo-router';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import { listFunds, type Fund } from '../../lib/api/funds';
 import FundRow from '../../components/ui/FundRow';
@@ -166,6 +167,7 @@ export default function Funds() {
               return3y={item.return_3y}
               aumCr={item.aum_cr}
               recommended={(item.trezofin_score ?? 0) >= 7.5}
+              onPress={() => item.isin && router.push(`/funds/${item.isin}`)}
             />
           )}
           initialNumToRender={12}

@@ -46,7 +46,8 @@
         {
           "microphonePermission": "Trezofin AI uses your microphone so you can ask questions by voice."
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

@@ -5,14 +5,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { TrendingUp, Shield, ChevronRight, Award, Star, RefreshCw } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { getUserProfile, type UserProfile } from '../../lib/api/client';
-import { getVoiceContext } from '../../lib/api/ai';
 import { useSession } from '../../lib/hooks/useSession';
 import { useTheme } from '../../lib/theme/ThemeProvider';
+import { supabase } from '../../lib/supabase/client';
 import VoiceBar from '../../components/voice/VoiceBar';
 import Card from '../../components/ui/Card';
 import ScoreBadge from '../../components/ui/ScoreBadge';
 
-type RecoFund = { name: string; category: string | null; score: number | null };
+type RecoFund = {
+  isin: string | null;
+  name: string;
+  category: string | null;
+  score: number | null;
+};
 
 export default function Dashboard() {
   const t = useTheme();
@@ -25,12 +30,30 @@ export default function Dashboard() {
   const load = useCallback(async () => {
     if (!accessToken) return;
     try {
-      const [p, ctx] = await Promise.all([
-        getUserProfile(accessToken).catch(() => null),
-        getVoiceContext(accessToken).catch(() => null),
-      ]);
+      const p = await getUserProfile(accessToken).catch(() => null);
       if (p) setProfile(p);
-      if (ctx?.recommended_funds) setRecos(ctx.recommended_funds);
+
+      // Recommended picks from Supabase — same data Tara uses via
+      // voice-context but with ISINs so taps can route to detail.
+      const category = p?.risk_category;
+      if (category) {
+        const { data } = await supabase
+          .from('funds')
+          .select('isin, fund_name, category, trezofin_score')
+          .eq('risk_category', category)
+          .not('fund_name', 'is', null)
+          .not('isin', 'is', null)
+          .order('trezofin_score', { ascending: false })
+          .limit(5);
+        setRecos(
+          (data ?? []).map((f) => ({
+            isin: f.isin,
+            name: f.fund_name,
+            category: f.category,
+            score: f.trezofin_score,
+          })),
+        );
+      }
     } catch (e) {
       console.warn('dashboard load failed:', (e as Error).message);
     } finally {
@@ -106,20 +129,28 @@ export default function Dashboard() {
                     </Text>
                   </View>
                   <Pressable
-                    onPress={load}
-                    className="w-10 h-10 rounded-full items-center justify-center"
+                    onPress={() => router.push('/risk-assessment')}
+                    className="flex-row items-center gap-1.5 px-3 py-2 rounded-full"
                     style={{ backgroundColor: 'rgba(255,255,255,0.18)' }}
                   >
-                    <RefreshCw size={16} color="#ffffff" />
+                    <RefreshCw size={13} color="#ffffff" />
+                    <Text className="text-white text-[12px] font-semibold">Retake</Text>
                   </Pressable>
                 </View>
               </>
             ) : (
               <>
                 <Text className="text-white text-xl font-bold">Not assessed yet</Text>
-                <Text className="text-white/80 text-sm mt-1">
-                  Complete your risk assessment on the web app to get personalised recommendations.
+                <Text className="text-white/80 text-sm mt-1 mb-3">
+                  Take the 2-minute assessment to unlock personalised recommendations.
                 </Text>
+                <Pressable
+                  onPress={() => router.push('/risk-assessment')}
+                  className="self-start flex-row items-center gap-1.5 px-3.5 py-2 rounded-full"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.22)' }}
+                >
+                  <Text className="text-white text-[13px] font-semibold">Start now →</Text>
+                </Pressable>
               </>
             )}
           </LinearGradient>
@@ -154,25 +185,31 @@ export default function Dashboard() {
         ) : (
           <View className="gap-2.5">
             {recos.slice(0, 5).map((f, i) => (
-              <Card key={i} padding={14}>
-                <View className="flex-row items-center gap-3">
-                  <View
-                    className="w-9 h-9 rounded-xl items-center justify-center"
-                    style={{ backgroundColor: t.brand + '1A' }}
-                  >
-                    <Star size={16} color={t.brand} fill={t.brand} />
+              <Pressable
+                key={f.isin ?? i}
+                onPress={() => f.isin && router.push(`/funds/${f.isin}`)}
+                style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+              >
+                <Card padding={14}>
+                  <View className="flex-row items-center gap-3">
+                    <View
+                      className="w-9 h-9 rounded-xl items-center justify-center"
+                      style={{ backgroundColor: t.brand + '1A' }}
+                    >
+                      <Star size={16} color={t.brand} fill={t.brand} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text className="text-[15px] font-semibold" style={{ color: t.textPrimary }} numberOfLines={1}>
+                        {f.name}
+                      </Text>
+                      <Text className="text-[11px] mt-0.5" style={{ color: t.textSecondary }} numberOfLines={1}>
+                        {f.category ?? 'Mutual Fund'}
+                      </Text>
+                    </View>
+                    <ScoreBadge score={f.score} />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text className="text-[15px] font-semibold" style={{ color: t.textPrimary }} numberOfLines={1}>
-                      {f.name}
-                    </Text>
-                    <Text className="text-[11px] mt-0.5" style={{ color: t.textSecondary }} numberOfLines={1}>
-                      {f.category ?? 'Mutual Fund'}
-                    </Text>
-                  </View>
-                  <ScoreBadge score={f.score} />
-                </View>
-              </Card>
+                </Card>
+              </Pressable>
             ))}
           </View>
         )}
