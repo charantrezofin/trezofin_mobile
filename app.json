@@ -1,30 +1,60 @@
 {
   "expo": {
-    "name": "trezofin_mobile",
-    "slug": "trezofin_mobile",
-    "version": "1.0.0",
+    "name": "Trezofin AI",
+    "slug": "trezofin-mobile",
+    "scheme": "trezofin",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0a0e1a"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.trezofin.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Trezofin AI uses your microphone so you can ask questions about your investments by voice. Audio is sent to our AI service (Sarvam) for speech-to-text and is not stored.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0a0e1a"
       },
+      "package": "ai.trezofin.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Trezofin AI uses your microphone so you can ask questions by voice."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "http://localhost:8000",
+      "supabaseUrl": "",
+      "supabaseAnonKey": ""
     }
   }
 }
