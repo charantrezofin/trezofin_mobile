@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronRight, LogOut, Shield, Moon, Globe, Volume2, Mail, Wallet, Repeat, RefreshCw } from 'lucide-react-native';
+import { ChevronRight, LogOut, Shield, Moon, Sun, Monitor, Globe, Volume2, Mail, Wallet, Repeat, RefreshCw, Fingerprint } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { supabase } from '../../lib/supabase/client';
 import { getUserProfile, type UserProfile } from '../../lib/api/client';
 import { useSession } from '../../lib/hooks/useSession';
-import { useTheme } from '../../lib/theme/ThemeProvider';
+import { useTheme, useThemePref, type ThemePref } from '../../lib/theme/ThemeProvider';
+import { useBiometricLock } from '../../lib/hooks/useBiometricLock';
 import Card from '../../components/ui/Card';
 import Avatar from '../../components/ui/Avatar';
 import { SARVAM_LANGUAGES, DEFAULT_LANGUAGE_CODE, getLanguageByCode } from '../../lib/constants/languages';
@@ -18,7 +19,9 @@ const SPEAKER_KEY = 'trezofin_voice_speaker';
 
 export default function Profile() {
   const t = useTheme();
+  const { pref, setPref } = useThemePref();
   const { accessToken } = useSession();
+  const bio = useBiometricLock();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [lang, setLang]       = useState(DEFAULT_LANGUAGE_CODE);
@@ -212,10 +215,35 @@ export default function Profile() {
           />
           <Divider />
           <SettingRow
-            icon={<Moon size={18} color={t.brand} />}
+            icon={pref === 'dark' ? <Moon size={18} color={t.brand} /> : pref === 'light' ? <Sun size={18} color={t.brand} /> : <Monitor size={18} color={t.brand} />}
             title="Theme"
-            value={t.name === 'dark' ? 'Dark (system)' : 'Light (system)'}
-            chevron={false}
+            value={pref === 'auto' ? `Auto · ${t.name === 'dark' ? 'Dark' : 'Light'} now` : pref === 'dark' ? 'Dark' : 'Light'}
+            onPress={() => {
+              Alert.alert('Theme', 'Choose how the app looks.', [
+                { text: 'Auto (follow system)', onPress: () => setPref('auto' as ThemePref) },
+                { text: 'Light',                onPress: () => setPref('light' as ThemePref) },
+                { text: 'Dark',                 onPress: () => setPref('dark' as ThemePref) },
+                { text: 'Cancel', style: 'cancel' },
+              ]);
+            }}
+          />
+          <Divider />
+          <SettingRow
+            icon={<Fingerprint size={18} color={t.brand} />}
+            title="Biometric unlock"
+            value={
+              !bio.available
+                ? 'Not available on this device'
+                : bio.enabled ? 'On — required at launch' : 'Off'
+            }
+            onPress={async () => {
+              if (!bio.available) {
+                Alert.alert('Not available', 'Set up Face ID / fingerprint in your device settings first.');
+                return;
+              }
+              const ok = await bio.setEnabled(!bio.enabled);
+              if (!ok) Alert.alert('Authentication failed', 'Biometric was not confirmed.');
+            }}
           />
         </Card>
 

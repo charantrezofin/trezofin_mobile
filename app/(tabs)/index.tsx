@@ -2,26 +2,32 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { TrendingUp, Shield, ChevronRight, Award, Star, RefreshCw } from 'lucide-react-native';
+import { TrendingUp, Shield, ChevronRight, Award, RefreshCw } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { getUserProfile, type UserProfile } from '../../lib/api/client';
 import { useSession } from '../../lib/hooks/useSession';
+import { useWatchlist } from '../../lib/hooks/useWatchlist';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import { supabase } from '../../lib/supabase/client';
 import VoiceBar from '../../components/voice/VoiceBar';
 import Card from '../../components/ui/Card';
-import ScoreBadge from '../../components/ui/ScoreBadge';
+import FundRow from '../../components/ui/FundRow';
 
 type RecoFund = {
   isin: string | null;
+  amfi_code?: string | null;
   name: string;
   category: string | null;
   score: number | null;
+  return_1y?: number | null;
+  return_3y?: number | null;
+  aum_cr?: number | null;
 };
 
 export default function Dashboard() {
   const t = useTheme();
   const { accessToken, ready } = useSession();
+  const { toggle: toggleWatch, isWatched } = useWatchlist();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [recos, setRecos]   = useState<RecoFund[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +45,7 @@ export default function Dashboard() {
       if (category) {
         const { data } = await supabase
           .from('funds')
-          .select('isin, fund_name, category, trezofin_score')
+          .select('isin, amfi_code, fund_name, category, trezofin_score, return_1y, return_3y, aum_cr')
           .eq('risk_category', category)
           .not('fund_name', 'is', null)
           .not('isin', 'is', null)
@@ -48,9 +54,13 @@ export default function Dashboard() {
         setRecos(
           (data ?? []).map((f) => ({
             isin: f.isin,
+            amfi_code: f.amfi_code,
             name: f.fund_name,
             category: f.category,
             score: f.trezofin_score,
+            return_1y: f.return_1y,
+            return_3y: f.return_3y,
+            aum_cr: f.aum_cr,
           })),
         );
       }
@@ -185,31 +195,21 @@ export default function Dashboard() {
         ) : (
           <View className="gap-2.5">
             {recos.slice(0, 5).map((f, i) => (
-              <Pressable
+              <FundRow
                 key={f.isin ?? i}
+                name={f.name}
+                category={f.category}
+                score={f.score}
+                return1y={f.return_1y ?? null}
+                return3y={f.return_3y ?? null}
+                aumCr={f.aum_cr ?? null}
+                recommended
+                amfiCode={f.amfi_code ?? null}
+                isWatched={isWatched(f.amfi_code)}
+                onToggleWatch={() => f.amfi_code ? toggleWatch(f.amfi_code) : undefined}
+                onInvest={() => f.isin && router.push(`/funds/${f.isin}`)}
                 onPress={() => f.isin && router.push(`/funds/${f.isin}`)}
-                style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
-              >
-                <Card padding={14}>
-                  <View className="flex-row items-center gap-3">
-                    <View
-                      className="w-9 h-9 rounded-xl items-center justify-center"
-                      style={{ backgroundColor: t.brand + '1A' }}
-                    >
-                      <Star size={16} color={t.brand} fill={t.brand} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text className="text-[15px] font-semibold" style={{ color: t.textPrimary }} numberOfLines={1}>
-                        {f.name}
-                      </Text>
-                      <Text className="text-[11px] mt-0.5" style={{ color: t.textSecondary }} numberOfLines={1}>
-                        {f.category ?? 'Mutual Fund'}
-                      </Text>
-                    </View>
-                    <ScoreBadge score={f.score} />
-                  </View>
-                </Card>
-              </Pressable>
+              />
             ))}
           </View>
         )}

@@ -14,8 +14,9 @@ import {
 import { useLocalSearchParams, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
-import { TrendingUp, Wallet, Calendar, Repeat, Clock, X, Info } from 'lucide-react-native';
+import { TrendingUp, Wallet, Calendar, Repeat, Clock, X, Info, Heart } from 'lucide-react-native';
 import ScreenHeader from '../../components/ui/ScreenHeader';
+import { useWatchlist } from '../../lib/hooks/useWatchlist';
 import Card from '../../components/ui/Card';
 import ScoreBadge from '../../components/ui/ScoreBadge';
 import { useSession } from '../../lib/hooks/useSession';
@@ -43,6 +44,7 @@ export default function FundDetail() {
   const [loadingBse,      setLoadingBse]      = useState(true);
   const [bseError,        setBseError]        = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>(null);
+  const { isWatched, toggle } = useWatchlist();
 
   // Load Supabase fund meta (score, returns) + BSE scheme detail (limits).
   useEffect(() => {
@@ -82,7 +84,32 @@ export default function FundDetail() {
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader title="Fund details" subtitle={amc || undefined} />
+      <ScreenHeader
+        title="Fund details"
+        subtitle={amc || undefined}
+        right={
+          sbFund?.amfi_code ? (
+            <Pressable
+              onPress={async () => {
+                try { await toggle(sbFund.amfi_code!); }
+                catch (e) { Alert.alert('Oops', (e as Error).message); }
+              }}
+              hitSlop={10}
+              className="w-10 h-10 rounded-full items-center justify-center"
+              style={{
+                backgroundColor: isWatched(sbFund.amfi_code) ? t.brand + '22' : t.card,
+                borderColor: t.border, borderWidth: 1,
+              }}
+            >
+              <Heart
+                size={16}
+                color={isWatched(sbFund.amfi_code) ? t.brand : t.textSecondary}
+                fill={isWatched(sbFund.amfi_code) ? t.brand : 'transparent'}
+              />
+            </Pressable>
+          ) : null
+        }
+      />
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
         {/* Name + score */}
@@ -338,9 +365,12 @@ function InvestModal({
         if (link.auth_url) {
           await WebBrowser.openBrowserAsync(link.auth_url);
         } else {
+          // BSE sometimes sends the auth link via email instead of returning
+          // a URL here (typical for first-time orders + 2FA). Explain that
+          // clearly so the user knows to check their inbox.
           Alert.alert(
-            'Order placed',
-            'Your lumpsum order has been submitted. Check the Orders tab for payment status.',
+            'Check your email to authorise',
+            'Your lumpsum order has been placed. BSE has sent a payment authorisation link to your registered email — open it to complete the payment. You can also retry from My Orders → Pay now.',
           );
         }
       } else {
@@ -363,8 +393,8 @@ function InvestModal({
           await WebBrowser.openBrowserAsync(link.auth_url);
         } else {
           Alert.alert(
-            'SIP registered',
-            'Your SIP has been registered. Check the SIPs tab for auth status.',
+            'Check your email to authenticate',
+            'Your SIP has been registered. BSE has sent the first-installment authentication link to your registered email. You can also retry from My SIPs → Authenticate.',
           );
         }
       }

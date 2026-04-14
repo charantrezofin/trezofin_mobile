@@ -16,9 +16,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ai.trezofin.app",
+      "associatedDomains": ["applinks:trezofin.ai"],
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Trezofin AI uses your microphone so you can ask questions about your investments by voice. Audio is sent to our AI service (Sarvam) for speech-to-text and is not stored.",
-        "ITSAppUsesNonExemptEncryption": false
+        "NSFaceIDUsageDescription": "Trezofin AI uses Face ID to keep your financial data secure.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["audio"]
       }
     },
     "android": {
@@ -29,7 +32,17 @@
       "package": "ai.trezofin.app",
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.VIBRATE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "trezofin.ai" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
