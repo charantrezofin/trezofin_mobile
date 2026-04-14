@@ -25,7 +25,7 @@ async function getJson<T>(path: string, accessToken: string): Promise<T> {
 }
 
 export function getUserProfile(token: string) {
-  return getJson<UserProfile>('/api/v1/user/profile', token);
+  return getJson<UserProfile>('/api/v1/users/profile', token);
 }
 
 export type RecommendedFund = {
@@ -38,5 +38,5 @@ export type RecommendedFund = {
 };
 
 export function getRecommendedFunds(token: string) {
-  return getJson<RecommendedFund[]>('/api/v1/user/mutualfunds', token);
+  return getJson<RecommendedFund[]>('/api/v1/users/mutualfunds', token);
 }
