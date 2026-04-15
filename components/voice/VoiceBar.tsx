@@ -24,7 +24,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
-import { File, Paths } from 'expo-file-system';
+// Using the legacy FS API: the new File.write(base64, { encoding: 'base64' })
+// throws FunctionCallException on iOS SDK 54. writeAsStringAsync works.
+import * as LegacyFS from 'expo-file-system/legacy';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -61,7 +63,7 @@ const MIN_SPEECH_MS    =  400;  // require this much speech before arming silenc
 // around -40…-25 dBFS. We pick -42 as the speech gate so we catch
 // everyday talking without triggering on room noise, and -34 for
 // barge-in so TTS playback doesn't mis-interrupt itself.
-const DB_SPEECH        =  -42;
+const DB_SPEECH        =  -46;  // tuned on real device: normal speech reads ~-44 dB at arm's length
 const TICK_MS          =  120;  // metering poll interval
 const LANG_KEY         = 'trezofin_voice_lang';
 const SPEAKER_KEY      = 'trezofin_voice_speaker';
@@ -233,9 +235,12 @@ export default function VoiceBar() {
 
       // Write base64 → cache file, then play via expo-audio.
       // Each turn uses a fresh filename to defeat expo-audio's source cache.
-      const file = new File(Paths.cache, `tara-tts-${Date.now()}.wav`);
-      if (file.exists) file.delete();
-      file.write(tts.audio_base64, { encoding: 'base64' });
+      const cacheDir = LegacyFS.cacheDirectory ?? LegacyFS.documentDirectory;
+      if (!cacheDir) throw new Error('No cache directory available');
+      const fileUri = `${cacheDir}tara-tts-${Date.now()}.wav`;
+      await LegacyFS.writeAsStringAsync(fileUri, tts.audio_base64, {
+        encoding: LegacyFS.EncodingType.Base64,
+      });
 
       // Re-arm the recorder during TTS playback so the meter loop can
       // detect barge-in (user starts speaking while Tara is talking).
@@ -253,7 +258,7 @@ export default function VoiceBar() {
       // Tear down any prior player
       try { currentPlayerRef.current?.remove(); } catch { /* ignore */ }
 
-      const player = createAudioPlayer({ uri: file.uri });
+      const player = createAudioPlayer({ uri: fileUri });
       currentPlayerRef.current = player;
 
       setPhase('speaking');
