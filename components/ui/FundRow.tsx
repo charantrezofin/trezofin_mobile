@@ -9,7 +9,7 @@ type Props = {
   score?: number | null;
   return1y?: number | null;
   return3y?: number | null;
-  aumCr?: number | null;
+  aumCr?: number | null;            // kept for API compat, no longer rendered
   recommended?: boolean;
   amfiCode?: string | null;
   isWatched?: boolean;
@@ -22,7 +22,7 @@ type Props = {
 };
 
 export default function FundRow({
-  name, category, score, return1y, return3y, aumCr, recommended,
+  name, category, score, return1y, return3y, recommended,
   amfiCode, isWatched, onToggleWatch, onInvest, onPress,
   compareMode, compareSelected, onToggleCompare,
 }: Props) {
@@ -39,7 +39,7 @@ export default function FundRow({
       android_ripple={{ color: t.border }}
       style={({ pressed }) => ({
         backgroundColor: t.card,
-        borderRadius: 16,
+        borderRadius: 18,
         borderWidth: compareSelected ? 2 : 1,
         borderColor: compareSelected ? t.brand : recommended ? t.brand + '55' : t.border,
         padding: 14,
@@ -47,8 +47,8 @@ export default function FundRow({
         marginBottom: 10,
       })}
     >
+      {/* Top: heart + name + score */}
       <View className="flex-row items-start gap-3">
-        {/* Heart button or compare checkbox */}
         {compareMode ? (
           <View
             className="w-9 h-9 rounded-xl items-center justify-center"
@@ -58,11 +58,7 @@ export default function FundRow({
               borderColor: compareSelected ? t.brand : t.border,
             }}
           >
-            {compareSelected ? (
-              <Text className="text-white font-bold">✓</Text>
-            ) : (
-              <View style={{ width: 14, height: 14 }} />
-            )}
+            {compareSelected ? <Text className="text-white font-bold">✓</Text> : null}
           </View>
         ) : (
           <Pressable
@@ -80,7 +76,6 @@ export default function FundRow({
           </Pressable>
         )}
 
-        {/* Text block */}
         <View style={{ flex: 1 }}>
           <Text className="text-[14.5px] font-semibold" style={{ color: t.textPrimary }} numberOfLines={2}>
             {name}
@@ -100,45 +95,23 @@ export default function FundRow({
               </View>
             )}
           </View>
-
-          {/* Metrics row */}
-          <View className="flex-row items-center mt-2.5 gap-4">
-            <Metric label="1Y" value={return1y} />
-            <Metric label="3Y" value={return3y} />
-            {aumCr != null && (
-              <View>
-                <Text className="text-[9px] font-bold uppercase" style={{ color: t.textSecondary }}>AUM</Text>
-                <Text className="text-[12px] font-semibold" style={{ color: t.textPrimary }}>
-                  {aumCr >= 1000 ? `${(aumCr / 1000).toFixed(1)}K Cr` : `${aumCr.toFixed(0)} Cr`}
-                </Text>
-              </View>
-            )}
-          </View>
         </View>
 
         <ScoreBadge score={score ?? null} />
       </View>
 
-      {/* Action row — hidden in compare mode */}
+      {/* Bottom row: returns + Invest pill — all on one line */}
       {!compareMode && (
-        <View className="flex-row items-center gap-2 mt-3 pt-3" style={{ borderTopColor: t.border, borderTopWidth: 1 }}>
-          <Pressable
-            onPress={onPress}
-            className="flex-1 py-2 rounded-lg items-center"
-            style={{ backgroundColor: t.bg, borderColor: t.border, borderWidth: 1 }}
-          >
-            <Text className="text-[12px] font-semibold" style={{ color: t.textPrimary }}>
-              Details
-            </Text>
-          </Pressable>
+        <View className="flex-row items-center mt-3 gap-4">
+          <Metric label="1Y" value={return1y} />
+          <Metric label="3Y" value={return3y} />
+          <View style={{ flex: 1 }} />
           <Pressable
             onPress={onInvest ?? onPress}
-            className="flex-1 py-2 rounded-lg items-center"
+            className="px-4 py-1.5 rounded-full"
             style={{ backgroundColor: t.brand }}
           >
-            <Text className="text-[12px] font-semibold text-white">
-              Invest
-            </Text>
+            <Text className="text-[12px] font-semibold text-white">Invest</Text>
           </Pressable>
         </View>
       )}

@@ -35,6 +35,7 @@ import {
 } from 'expo-audio';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import { useSession } from '../../lib/hooks/useSession';
+import { API_BASE } from '../../lib/api/config';
 import {
   transcribeAudio,
   sendChatMessage,
@@ -264,9 +265,15 @@ export default function VoiceBar() {
       turnInFlightRef.current = false;
       if (sessionActiveRef.current) await startListening();
     } catch (e) {
-      if ((e as Error)?.name !== 'AbortError') {
-        console.warn('turn failed:', (e as Error).message);
-        setErrMsg((e as Error).message);
+      const err = e as Error;
+      if (err.name !== 'AbortError') {
+        // Surface concrete guidance. "Network request failed" on a phone
+        // almost always means the phone can't reach the dev Mac on LAN.
+        const msg = /network request failed|failed to fetch/i.test(err.message)
+          ? `Can't reach backend at ${API_BASE}. On a phone, localhost points to the phone itself — set EXPO_PUBLIC_API_URL to your Mac's LAN IP in .env and reload.`
+          : err.message;
+        console.warn('voice turn failed:', err.message, 'API_BASE=', API_BASE);
+        setErrMsg(msg);
       }
       turnInFlightRef.current = false;
       if (sessionActiveRef.current) await startListening();
@@ -338,6 +345,15 @@ export default function VoiceBar() {
         if (spokeFor >= MIN_SPEECH_MS && silentFor >= SILENCE_MS) {
           await finaliseChunk();
         }
+      }
+      // Diagnostic: if the device never hands us a metering value, the
+      // silence gate can't trip and the session will sit idle forever.
+      // Surface that clearly after a few seconds.
+      if (db <= -79 && speechStartAtRef.current == null) {
+        // metering is flat-silent — could be hardware mute, permission
+        // denied, or expo-audio metering disabled. Nothing to do here
+        // beyond let the user see the "Listening" pill; we'll catch
+        // real errors in the try/catch below.
       }
     }, TICK_MS);
   }, [recorder, level, interruptTts]);

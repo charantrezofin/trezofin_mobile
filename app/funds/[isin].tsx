@@ -10,7 +10,6 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
-  useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -22,6 +21,8 @@ import { useWatchlist } from '../../lib/hooks/useWatchlist';
 import Card from '../../components/ui/Card';
 import ScoreBadge from '../../components/ui/ScoreBadge';
 import NavChart from '../../components/charts/NavChart';
+import CalendarYearsChart from '../../components/charts/CalendarYearsChart';
+import { getFundAnalytics, type FundAnalyticsDetail } from '../../lib/api/fund-analytics';
 import { useSession } from '../../lib/hooks/useSession';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import { supabase } from '../../lib/supabase/client';
@@ -44,12 +45,12 @@ export default function FundDetail() {
 
   const [sbFund, setSbFund]   = useState<Fund | null>(null);
   const [scheme, setScheme]   = useState<SchemeDetail | null>(null);
+  const [analytics, setAnalytics] = useState<FundAnalyticsDetail | null>(null);
   const [loadingSupabase, setLoadingSupabase] = useState(true);
   const [loadingBse,      setLoadingBse]      = useState(true);
   const [bseError,        setBseError]        = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>(null);
   const { isWatched, toggle } = useWatchlist();
-  const { width } = useWindowDimensions();
   const [uccNeeded, setUccNeeded] = useState(false);
 
   // UCC gate: if the user hasn't completed onboarding, BSE will reject
@@ -94,6 +95,11 @@ export default function FundDetail() {
           .eq('isin', isin)
           .maybeSingle();
         if (!cancelled) setSbFund(data as Fund | null);
+        const amfi = (data as Fund | null)?.amfi_code;
+        if (amfi) {
+          const a = await getFundAnalytics(amfi);
+          if (!cancelled) setAnalytics(a);
+        }
       } catch { /* ignore */ }
       finally { if (!cancelled) setLoadingSupabase(false); }
     })();
@@ -176,7 +182,7 @@ export default function FundDetail() {
           NAV trend
         </Text>
         <Card padding={16} style={{ marginBottom: 14 }}>
-          {isin ? <NavChart isin={String(isin)} width={width} /> : null}
+          {isin ? <NavChart isin={String(isin)} /> : null}
         </Card>
 
         {/* Returns grid */}
@@ -198,6 +204,64 @@ export default function FundDetail() {
             </View>
           )}
         </Card>
+
+        {/* Calendar year returns */}
+        {analytics?.calendar_years?.length ? (
+          <>
+            <Text
+              className="text-[10px] font-bold uppercase tracking-widest mb-2 ml-1"
+              style={{ color: t.textSecondary }}
+            >
+              Calendar year returns
+            </Text>
+            <Card padding={16} style={{ marginBottom: 14 }}>
+              <CalendarYearsChart data={analytics.calendar_years} />
+            </Card>
+          </>
+        ) : null}
+
+        {/* Rolling returns */}
+        {analytics?.rolling_returns ? (
+          <>
+            <Text
+              className="text-[10px] font-bold uppercase tracking-widest mb-2 ml-1"
+              style={{ color: t.textSecondary }}
+            >
+              Rolling 3Y returns
+            </Text>
+            <Card padding={16} style={{ marginBottom: 14 }}>
+              <View className="flex-row flex-wrap">
+                <RollingCell label="Avg" pct={analytics.rolling_returns.avg_return} />
+                <RollingCell label="High" pct={analytics.rolling_returns.high} />
+                <RollingCell label="Low" pct={analytics.rolling_returns.low} />
+                <RollingCell label="Volatility" pct={analytics.rolling_returns.volatility} />
+                <RollingCell label="Positive %" pct={analytics.rolling_returns.positive_pct} />
+              </View>
+            </Card>
+          </>
+        ) : null}
+
+        {/* SIP returns */}
+        {analytics?.sip_returns?.xirr != null ? (
+          <>
+            <Text
+              className="text-[10px] font-bold uppercase tracking-widest mb-2 ml-1"
+              style={{ color: t.textSecondary }}
+            >
+              SIP · ₹10,000 / month · 5 years
+            </Text>
+            <Card padding={16} style={{ marginBottom: 14 }}>
+              <View className="flex-row gap-4">
+                <SipCell label="Invested" value={fmtRupees(analytics.sip_returns.invested_value)} />
+                <SipCell label="Value now" value={fmtRupees(analytics.sip_returns.final_value)} />
+                <SipCell label="XIRR"
+                  value={`${analytics.sip_returns.xirr >= 0 ? '+' : ''}${analytics.sip_returns.xirr.toFixed(1)}%`}
+                  color={analytics.sip_returns.xirr >= 0 ? '#10b981' : '#ef4444'}
+                />
+              </View>
+            </Card>
+          </>
+        ) : null}
 
         {/* AUM + risk strip */}
         <Card padding={16} style={{ marginBottom: 14 }}>
@@ -225,62 +289,39 @@ export default function FundDetail() {
           </View>
         </Card>
 
-        {/* Transaction limits (from BSE) */}
-        <Text
-          className="text-[10px] font-bold uppercase tracking-widest mb-2 ml-1"
-          style={{ color: t.textSecondary }}
-        >
-          Transaction limits
-        </Text>
-        {loadingBse ? (
-          <Card><ActivityIndicator color={t.brand} /></Card>
-        ) : bseError ? (
-          <Card>
-            <View className="flex-row items-start gap-2">
-              <Info size={14} color={t.textSecondary} />
-              <Text className="text-[12px]" style={{ color: t.textSecondary }}>
-                Could not load live limits from BSE: {bseError}
+        {/* Minimum investment — compact two-column summary */}
+        {scheme && (
+          <Card padding={16} style={{ marginBottom: 14, flexDirection: 'row' }}>
+            <View style={{ flex: 1 }}>
+              <Text className="text-[10px] font-bold uppercase tracking-widest" style={{ color: t.textSecondary }}>
+                Min. Lumpsum
+              </Text>
+              <Text className="text-lg font-bold mt-1" style={{ color: t.textPrimary }}>
+                ₹{scheme.lumpsum.purchase.min_amount.toLocaleString('en-IN')}
+              </Text>
+            </View>
+            <View style={{ flex: 1, paddingLeft: 12, borderLeftWidth: 1, borderLeftColor: t.border }}>
+              <Text className="text-[10px] font-bold uppercase tracking-widest" style={{ color: t.textSecondary }}>
+                Min. SIP
+              </Text>
+              <Text className="text-lg font-bold mt-1" style={{ color: t.textPrimary }}>
+                {scheme.systematic
+                  ? `₹${scheme.systematic.min_amount.toLocaleString('en-IN')}`
+                  : '—'}
               </Text>
             </View>
           </Card>
-        ) : scheme ? (
-          <Card padding={0} style={{ overflow: 'hidden' }}>
-            <LimitRow
-              label="Lumpsum · min"
-              value={`₹${scheme.lumpsum.purchase.min_amount.toLocaleString('en-IN')}`}
-            />
-            <LimitRow
-              label="Lumpsum · max"
-              value={scheme.lumpsum.purchase.max_amount
-                ? `₹${scheme.lumpsum.purchase.max_amount.toLocaleString('en-IN')}`
-                : 'No limit'}
-            />
-            <LimitRow
-              label="Cut-off time"
-              value={scheme.lumpsum.purchase.cutoff_time}
-            />
-            {scheme.systematic ? (
-              <>
-                <LimitRow
-                  label="SIP · min"
-                  value={`₹${scheme.systematic.min_amount.toLocaleString('en-IN')}`}
-                />
-                <LimitRow
-                  label="SIP · frequency"
-                  value={scheme.systematic.frequency}
-                />
-                <LimitRow
-                  label="SIP · dates"
-                  value={scheme.systematic.allowed_dates.slice(0, 8).join(', ')
-                    + (scheme.systematic.allowed_dates.length > 8 ? '…' : '')}
-                  last
-                />
-              </>
-            ) : (
-              <LimitRow label="SIP" value="Not available" last />
-            )}
+        )}
+        {bseError && !scheme && (
+          <Card style={{ marginBottom: 14 }}>
+            <View className="flex-row items-start gap-2">
+              <Info size={14} color={t.textSecondary} />
+              <Text className="text-[12px]" style={{ color: t.textSecondary }}>
+                Live scheme data unavailable: {bseError}
+              </Text>
+            </View>
           </Card>
-        ) : null}
+        )}
       </ScrollView>
 
       {/* Action bar */}
@@ -516,17 +557,36 @@ function RedeemModal({
   );
 }
 
-function LimitRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+function RollingCell({ label, pct }: { label: string; pct: number | null | undefined }) {
   const t = useTheme();
+  const color = label === 'Volatility' ? t.textPrimary
+    : pct == null ? t.textSecondary
+    : pct >= 0 ? '#10b981' : '#ef4444';
   return (
-    <View
-      className="flex-row items-center justify-between px-4 py-3"
-      style={{ borderBottomColor: last ? 'transparent' : t.border, borderBottomWidth: last ? 0 : 1 }}
-    >
-      <Text className="text-[13px]" style={{ color: t.textSecondary }}>{label}</Text>
-      <Text className="text-[13px] font-semibold" style={{ color: t.textPrimary }}>{value}</Text>
+    <View style={{ width: '33.333%', paddingVertical: 6 }}>
+      <Text className="text-[10px] font-bold uppercase" style={{ color: t.textSecondary }}>{label}</Text>
+      <Text className="text-[13px] font-bold mt-0.5" style={{ color }}>
+        {pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}
+      </Text>
     </View>
   );
+}
+
+function SipCell({ label, value, color }: { label: string; value: string; color?: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ flex: 1 }}>
+      <Text className="text-[10px] font-bold uppercase" style={{ color: t.textSecondary }}>{label}</Text>
+      <Text className="text-[14px] font-bold mt-0.5" style={{ color: color ?? t.textPrimary }}>{value}</Text>
+    </View>
+  );
+}
+
+function fmtRupees(v: number | null | undefined): string {
+  if (v == null) return '—';
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(2)}Cr`;
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`;
+  return `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
 function Metric({
