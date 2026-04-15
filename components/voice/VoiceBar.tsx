@@ -55,8 +55,13 @@ import {
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 const SILENCE_MS       = 2000;  // 2s silence = user stopped
-const MIN_SPEECH_MS    =  500;  // require this much speech before arming silence
-const DB_SPEECH        =  -28;  // dBFS above this counts as speech
+const MIN_SPEECH_MS    =  400;  // require this much speech before arming silence
+// Phone mics report dBFS roughly in [-80, 0]. Ambient indoor noise sits
+// around -55…-45 dBFS; normal conversational speech at arm's length sits
+// around -40…-25 dBFS. We pick -42 as the speech gate so we catch
+// everyday talking without triggering on room noise, and -34 for
+// barge-in so TTS playback doesn't mis-interrupt itself.
+const DB_SPEECH        =  -42;
 const TICK_MS          =  120;  // metering poll interval
 const LANG_KEY         = 'trezofin_voice_lang';
 const SPEAKER_KEY      = 'trezofin_voice_speaker';
@@ -73,6 +78,8 @@ export default function VoiceBar() {
   const [errMsg, setErrMsg]            = useState<string | null>(null);
   const [lang, setLang]                = useState(DEFAULT_LANGUAGE_CODE);
   const [speaker, setSpeaker]          = useState(DEFAULT_SPEAKER_ID);
+  const [liveDb, setLiveDb]            = useState<number | null>(null);   // shown in diagnostic bar
+  const [spokeDetected, setSpokeDetected] = useState(false);              // flips true once we've seen >DB_SPEECH
 
   // Load persisted prefs
   useEffect(() => {
@@ -160,13 +167,17 @@ export default function VoiceBar() {
 
     try {
       // STT
+      console.log('[voice] STT → uri=', uri, 'mime=', mimeType);
       const stt = await transcribeAudio(accessToken, uri, mimeType, 'unknown', { signal });
       const userText = stt.transcribed_text?.trim();
+      console.log('[voice] STT result:', userText, 'lang=', stt.detected_language);
       if (!userText || userText.length < 2) {
+        setErrMsg("I didn't catch that — try speaking closer to the mic.");
         turnInFlightRef.current = false;
         if (sessionActiveRef.current) await startListening();
         return;
       }
+      setErrMsg(null);
       const inputLang  = stt.detected_language && stt.detected_language !== 'unknown'
         ? stt.detected_language
         : langRef.current;
@@ -174,6 +185,7 @@ export default function VoiceBar() {
 
       // Chat
       if (!sessionActiveRef.current) return;
+      console.log('[voice] /chat → in=', inputLang, 'out=', outputLang);
       const chat = await sendChatMessage(accessToken, userText, outputLang, {
         mode: 'voice',
         signal,
@@ -183,6 +195,7 @@ export default function VoiceBar() {
         userContext: userContextRef.current,
       });
       const replyText = chat.response_text?.trim();
+      console.log('[voice] chat reply:', replyText?.slice(0, 80));
       if (!replyText) {
         turnInFlightRef.current = false;
         if (sessionActiveRef.current) await startListening();
@@ -210,6 +223,7 @@ export default function VoiceBar() {
 
       // TTS
       if (!sessionActiveRef.current) return;
+      console.log('[voice] /speak → speaker=', speakerRef.current, 'chars=', replyText.length);
       const tts = await speakText(accessToken, replyText, outputLang, {
         signal,
         speaker: speakerRef.current,
@@ -281,9 +295,11 @@ export default function VoiceBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken]);
 
-  // Barge-in detection threshold while Tara is speaking. Slightly higher
-  // than DB_SPEECH so we don't trip on echo / ambient noise.
-  const DB_BARGE = -22;
+  // Barge-in: while Tara is speaking, the phone picks up its own
+  // speaker output on the mic. We need a threshold well ABOVE that
+  // echo or the assistant interrupts itself. -25 dBFS with a 400ms
+  // hold is a tight test — only real directed voice trips it.
+  const DB_BARGE = -25;
   const bargeStartAtRef = useRef<number | null>(null);
 
   /**
@@ -302,6 +318,9 @@ export default function VoiceBar() {
   }, []);
 
   // ── Silence-detection + barge-in ticker ──────────────────────────────────
+  // We sample dBFS every TICK_MS, and re-render the diagnostic readout at
+  // ~4 Hz so the UI stays responsive without thrashing React.
+  const lastUiRef = useRef(0);
   const startMeterLoop = useCallback(() => {
     if (meterTimerRef.current) clearInterval(meterTimerRef.current);
     meterTimerRef.current = setInterval(async () => {
@@ -309,8 +328,17 @@ export default function VoiceBar() {
 
       const status = recorder.getStatus();
       const db = status?.metering ?? -80;      // dBFS, typically -80..0
-      const norm = Math.max(0, Math.min(1, (db + 60) / 60));
+      // Wider range for the waveform so it actually moves at normal
+      // conversational volume on a phone mic (roughly -45..-20 dBFS).
+      const norm = Math.max(0, Math.min(1, (db + 70) / 60));
       level.value = withTiming(norm, { duration: TICK_MS });
+
+      // Throttle diagnostic UI updates to ~4Hz
+      const nowTs = Date.now();
+      if (nowTs - lastUiRef.current > 240) {
+        lastUiRef.current = nowTs;
+        setLiveDb(Number.isFinite(db) ? Math.round(db) : null);
+      }
 
       // Barge-in: while Tara is speaking, watch for user voice and pivot
       // back to listening if they start talking. Requires ~250ms of
@@ -319,8 +347,9 @@ export default function VoiceBar() {
         const now = Date.now();
         if (db > DB_BARGE) {
           if (bargeStartAtRef.current == null) bargeStartAtRef.current = now;
-          if (now - bargeStartAtRef.current >= 250) {
+          if (now - bargeStartAtRef.current >= 400) {
             bargeStartAtRef.current = null;
+            console.log('[voice] barge-in detected at', db, 'dB');
             await interruptTts();
           }
         } else {
@@ -336,24 +365,19 @@ export default function VoiceBar() {
 
       const now = Date.now();
       if (db > DB_SPEECH) {
-        if (speechStartAtRef.current == null) speechStartAtRef.current = now;
+        if (speechStartAtRef.current == null) {
+          speechStartAtRef.current = now;
+          setSpokeDetected(true);   // show the user we heard them
+        }
         silenceStartAtRef.current = null;
       } else if (speechStartAtRef.current != null) {
         if (silenceStartAtRef.current == null) silenceStartAtRef.current = now;
         const silentFor = now - silenceStartAtRef.current;
         const spokeFor  = silenceStartAtRef.current - speechStartAtRef.current;
         if (spokeFor >= MIN_SPEECH_MS && silentFor >= SILENCE_MS) {
+          console.log('[voice] auto-finalise — spokeFor', spokeFor, 'silentFor', silentFor);
           await finaliseChunk();
         }
-      }
-      // Diagnostic: if the device never hands us a metering value, the
-      // silence gate can't trip and the session will sit idle forever.
-      // Surface that clearly after a few seconds.
-      if (db <= -79 && speechStartAtRef.current == null) {
-        // metering is flat-silent — could be hardware mute, permission
-        // denied, or expo-audio metering disabled. Nothing to do here
-        // beyond let the user see the "Listening" pill; we'll catch
-        // real errors in the try/catch below.
       }
     }, TICK_MS);
   }, [recorder, level, interruptTts]);
@@ -371,15 +395,18 @@ export default function VoiceBar() {
     try {
       speechStartAtRef.current = null;
       silenceStartAtRef.current = null;
+      setSpokeDetected(false);
       await recorder.prepareToRecordAsync({
         ...RecordingPresets.HIGH_QUALITY,
         isMeteringEnabled: true,
       });
       recorder.record();
       setPhase('listening');
+      console.log('[voice] listening started, API_BASE=', API_BASE);
       startMeterLoop();
     } catch (e) {
-      console.warn('startListening failed:', (e as Error).message);
+      console.warn('[voice] startListening failed:', (e as Error).message);
+      setErrMsg(`Couldn't start the mic: ${(e as Error).message}`);
     }
   }, [recorder, startMeterLoop]);
 
@@ -463,6 +490,9 @@ export default function VoiceBar() {
     level.value = withTiming(0, { duration: 200 });
     setPhase('idle');
     setSessionActive(false);
+    setLiveDb(null);
+    setSpokeDetected(false);
+    setErrMsg(null);
   }, [recorder, level]);
 
   // Stop on unmount
@@ -681,9 +711,43 @@ export default function VoiceBar() {
             )}
           </View>
 
+          {/* Diagnostic + manual Send (only while listening) */}
+          {phase === 'listening' && (
+            <View className="flex-row items-center justify-between mt-3 gap-3">
+              <View className="flex-row items-center gap-2" style={{ flex: 1 }}>
+                <View
+                  style={{
+                    width: 7, height: 7, borderRadius: 4,
+                    backgroundColor: spokeDetected ? '#10b981' : t.textOnVoiceMuted,
+                  }}
+                />
+                <Text style={{ color: t.textOnVoiceMuted, fontSize: 11 }}>
+                  {spokeDetected ? 'Heard you' : 'Waiting for you to speak'}
+                  {liveDb != null ? ` · ${liveDb} dB` : ''}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => finaliseChunk()}
+                className="px-3 py-1.5 rounded-full"
+                style={{
+                  backgroundColor: spokeDetected ? t.brand : 'rgba(255,255,255,0.12)',
+                }}
+              >
+                <Text
+                  style={{
+                    color: spokeDetected ? '#ffffff' : t.textOnVoiceMuted,
+                    fontSize: 11, fontWeight: '700',
+                  }}
+                >
+                  Send now
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
           {/* Hint / error */}
           <Text
-            className="text-[11px] mt-3 text-center"
+            className="text-[11px] mt-2 text-center"
             style={{
               color: errMsg ? '#fca5a5' :
                      sessionActive ? accent.hex : t.textOnVoiceMuted,
@@ -694,7 +758,7 @@ export default function VoiceBar() {
               ? errMsg
               : !sessionActive
                 ? `Tap the mic · Speak in ${langObj.label}`
-                : phase === 'listening' ? 'Speak naturally — I\'ll reply when you pause'
+                : phase === 'listening' ? 'Speak naturally — I\'ll reply after a short pause'
                 : phase === 'thinking'  ? 'Thinking of a quick answer…'
                 : phase === 'speaking'  ? 'Speaking…'
                 : ''}
