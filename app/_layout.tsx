@@ -133,7 +133,10 @@ function Shell() {
             <PushRegistrar />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
               <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="auth/login" />
+              <Stack.Screen name="auth/login"           options={{ animation: 'fade' }} />
+              <Stack.Screen name="auth/signup"          options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="auth/verify-otp"      options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="auth/forgot-password" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="funds/[isin]" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="orders" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="compare"   options={{ animation: 'slide_from_right' }} />

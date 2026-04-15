@@ -1,16 +1,11 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, Pressable, ActivityIndicator, Alert } from 'react-native';
+import { router } from 'expo-router';
+import { Mail, Lock, ArrowRight } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase/client';
 import { useTheme } from '../../lib/theme/ThemeProvider';
+import AuthLayout from '../../components/auth/AuthLayout';
+import AuthField from '../../components/auth/AuthField';
 
 export default function Login() {
   const t = useTheme();
@@ -23,83 +18,121 @@ export default function Login() {
     if (!email || !password) return;
     setError(null);
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
     setLoading(false);
     if (error) setError(error.message);
+    // on success, AuthGate in _layout.tsx redirects to /(tabs)
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1 }}
-      >
-        <View className="flex-1 justify-center px-8">
-          <View className="mb-10">
-            <Text
-              className="text-4xl font-bold mb-2"
-              style={{ color: t.textPrimary }}
-            >
-              Trezofin AI
+    <AuthLayout
+      title="Welcome back"
+      subtitle="Sign in to continue investing with Tara."
+      footer={
+        <View className="flex-row items-center justify-center gap-1.5">
+          <Text style={{ color: t.textSecondary, fontSize: 13 }}>
+            New to Trezofin?
+          </Text>
+          <Pressable onPress={() => router.push('/auth/signup')} hitSlop={8}>
+            <Text style={{ color: t.brand, fontSize: 13, fontWeight: '700' }}>
+              Create an account
             </Text>
-            <Text style={{ color: t.textSecondary }} className="text-base">
-              Your AI investment buddy.
-            </Text>
-          </View>
-
-          <View className="gap-3">
-            <TextInput
-              placeholder="Email"
-              placeholderTextColor={t.textSecondary}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              value={email}
-              onChangeText={setEmail}
-              className="rounded-2xl px-4 py-4 text-base"
-              style={{
-                backgroundColor: t.card,
-                color: t.textPrimary,
-                borderWidth: 1,
-                borderColor: t.border,
-              }}
-            />
-            <TextInput
-              placeholder="Password"
-              placeholderTextColor={t.textSecondary}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-              className="rounded-2xl px-4 py-4 text-base"
-              style={{
-                backgroundColor: t.card,
-                color: t.textPrimary,
-                borderWidth: 1,
-                borderColor: t.border,
-              }}
-            />
-
-            {error ? (
-              <Text className="text-red-500 text-sm px-1">{error}</Text>
-            ) : null}
-
-            <Pressable
-              onPress={signIn}
-              disabled={loading || !email || !password}
-              className="rounded-2xl py-4 items-center mt-2"
-              style={{
-                backgroundColor: loading || !email || !password ? t.border : t.brand,
-                opacity: loading || !email || !password ? 0.7 : 1,
-              }}
-            >
-              {loading ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <Text className="text-white font-semibold text-base">Sign in</Text>
-              )}
-            </Pressable>
-          </View>
+          </Pressable>
         </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      }
+    >
+      <AuthField
+        label="Email"
+        leftIcon={<Mail size={16} color={t.textSecondary} />}
+        placeholder="you@example.com"
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoComplete="email"
+        value={email}
+        onChangeText={setEmail}
+        returnKeyType="next"
+      />
+      <AuthField
+        label="Password"
+        leftIcon={<Lock size={16} color={t.textSecondary} />}
+        placeholder="••••••••"
+        autoCapitalize="none"
+        autoComplete="password"
+        secureTextEntry
+        toggleSecure
+        value={password}
+        onChangeText={setPassword}
+        returnKeyType="go"
+        onSubmitEditing={signIn}
+      />
+
+      <Pressable
+        onPress={() => router.push('/auth/forgot-password')}
+        hitSlop={6}
+        style={{ alignSelf: 'flex-end', marginTop: -2, marginBottom: 20 }}
+      >
+        <Text style={{ color: t.brand, fontSize: 13, fontWeight: '600' }}>
+          Forgot password?
+        </Text>
+      </Pressable>
+
+      {error ? (
+        <Text style={{ color: '#ef4444', fontSize: 13, marginBottom: 10 }}>
+          {error}
+        </Text>
+      ) : null}
+
+      <Pressable
+        onPress={signIn}
+        disabled={loading || !email || !password}
+        className="flex-row items-center justify-center gap-2 py-4 rounded-2xl"
+        style={{
+          backgroundColor: loading || !email || !password ? t.border : t.brand,
+        }}
+      >
+        {loading ? (
+          <ActivityIndicator color="#ffffff" />
+        ) : (
+          <>
+            <Text className="text-white font-semibold text-base">Sign in</Text>
+            <ArrowRight size={16} color="#ffffff" />
+          </>
+        )}
+      </Pressable>
+
+      <View className="flex-row items-center gap-3 my-5">
+        <View style={{ flex: 1, height: 1, backgroundColor: t.border }} />
+        <Text style={{ color: t.textSecondary, fontSize: 11, fontWeight: '600' }}>
+          OR
+        </Text>
+        <View style={{ flex: 1, height: 1, backgroundColor: t.border }} />
+      </View>
+
+      <Pressable
+        onPress={async () => {
+          if (!email) {
+            Alert.alert('Email needed', 'Enter your email first — we\'ll send a sign-in code.');
+            return;
+          }
+          setLoading(true);
+          const { error } = await supabase.auth.signInWithOtp({
+            email: email.trim().toLowerCase(),
+          });
+          setLoading(false);
+          if (error) Alert.alert('OTP failed', error.message);
+          else router.push({ pathname: '/auth/verify-otp', params: { email: email.trim().toLowerCase() } });
+        }}
+        disabled={loading}
+        className="py-4 rounded-2xl items-center"
+        style={{ backgroundColor: t.card, borderColor: t.border, borderWidth: 1 }}
+      >
+        <Text style={{ color: t.textPrimary, fontWeight: '600', fontSize: 14 }}>
+          Sign in with email OTP
+        </Text>
+      </Pressable>
+    </AuthLayout>
   );
 }
