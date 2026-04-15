@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronRight, LogOut, Shield, Moon, Sun, Monitor, Globe, Volume2, Mail, Wallet, Repeat, RefreshCw, Fingerprint, ShieldCheck } from 'lucide-react-native';
+import { ChevronRight, LogOut, Shield, Moon, Sun, Monitor, Globe, Volume2, Mail, Wallet, Repeat, RefreshCw, Fingerprint, ShieldCheck, UserCheck } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { supabase } from '../../lib/supabase/client';
@@ -196,6 +196,13 @@ export default function Profile() {
             title="Mandates"
             value="UPI & eNACH autopay"
             onPress={() => router.push('/mandates')}
+          />
+          <Divider />
+          <SettingRow
+            icon={<UserCheck size={18} color={t.brand} />}
+            title="Onboarding (UCC / KYC)"
+            value="PAN, bank, address, FATCA"
+            onPress={() => router.push('/onboarding')}
           />
         </Card>
 

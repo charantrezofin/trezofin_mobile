@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { TrendingUp, Shield, ChevronRight, Award, RefreshCw } from 'lucide-react-native';
+import { TrendingUp, Shield, ChevronRight, Award, RefreshCw, AlertTriangle } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { getUserProfile, type UserProfile } from '../../lib/api/client';
+import { getProfileFull, uccIncomplete, type ProfileFull } from '../../lib/api/profile';
 import { useSession } from '../../lib/hooks/useSession';
 import { useWatchlist } from '../../lib/hooks/useWatchlist';
 import { useTheme } from '../../lib/theme/ThemeProvider';
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const { accessToken, ready } = useSession();
   const { toggle: toggleWatch, isWatched } = useWatchlist();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [ucc, setUcc]       = useState<ProfileFull | null>(null);
   const [recos, setRecos]   = useState<RecoFund[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,8 +38,12 @@ export default function Dashboard() {
   const load = useCallback(async () => {
     if (!accessToken) return;
     try {
-      const p = await getUserProfile(accessToken).catch(() => null);
+      const [p, uccP] = await Promise.all([
+        getUserProfile(accessToken).catch(() => null),
+        getProfileFull(accessToken).catch(() => null),
+      ]);
       if (p) setProfile(p);
+      if (uccP) setUcc(uccP);
 
       // Recommended picks from Supabase — same data Tara uses via
       // voice-context but with ISINs so taps can route to detail.
@@ -110,6 +116,39 @@ export default function Dashboard() {
             Hi, {firstName} 👋
           </Text>
         </View>
+
+        {/* UCC onboarding banner — shown until the user is 'active' */}
+        {uccIncomplete(ucc) && (
+          <Pressable
+            onPress={() => router.push('/onboarding')}
+            style={({ pressed }) => ({
+              flexDirection: 'row', alignItems: 'center', gap: 12,
+              padding: 14, borderRadius: 16,
+              backgroundColor: '#f59e0b22',
+              borderColor: '#f59e0b', borderWidth: 1,
+              marginBottom: 14,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <View
+              className="w-9 h-9 rounded-xl items-center justify-center"
+              style={{ backgroundColor: '#f59e0b33' }}
+            >
+              <AlertTriangle size={18} color="#b45309" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text className="text-[13.5px] font-bold" style={{ color: '#92400e' }}>
+                Finish onboarding to start investing
+              </Text>
+              <Text className="text-[11px] mt-0.5" style={{ color: '#b45309' }}>
+                {ucc?.status === 'ucc_submitted'
+                  ? 'UCC submitted — complete the 2FA step to activate.'
+                  : 'Takes 3 minutes. PAN, bank, address, FATCA.'}
+              </Text>
+            </View>
+            <ChevronRight size={16} color="#b45309" />
+          </Pressable>
+        )}
 
         {/* Strategy hero — gradient card */}
         <View style={{ borderRadius: 24, overflow: 'hidden', marginBottom: 16 }}>

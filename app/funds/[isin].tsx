@@ -10,15 +10,18 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
+  useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
+import { getProfileFull, uccIncomplete } from '../../lib/api/profile';
 import { TrendingUp, Wallet, Calendar, Repeat, Clock, X, Info, Heart, Banknote } from 'lucide-react-native';
 import ScreenHeader from '../../components/ui/ScreenHeader';
 import { useWatchlist } from '../../lib/hooks/useWatchlist';
 import Card from '../../components/ui/Card';
 import ScoreBadge from '../../components/ui/ScoreBadge';
+import NavChart from '../../components/charts/NavChart';
 import { useSession } from '../../lib/hooks/useSession';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import { supabase } from '../../lib/supabase/client';
@@ -46,6 +49,38 @@ export default function FundDetail() {
   const [bseError,        setBseError]        = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>(null);
   const { isWatched, toggle } = useWatchlist();
+  const { width } = useWindowDimensions();
+  const [uccNeeded, setUccNeeded] = useState(false);
+
+  // UCC gate: if the user hasn't completed onboarding, BSE will reject
+  // any order. Probe once when the detail page loads so we can route to
+  // onboarding instead of letting the order fail.
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await getProfileFull(accessToken);
+        if (!cancelled) setUccNeeded(uccIncomplete(p));
+      } catch { /* ignore — don't block the page */ }
+    })();
+    return () => { cancelled = true; };
+  }, [accessToken]);
+
+  const guardOrRun = (fn: () => void) => {
+    if (uccNeeded) {
+      Alert.alert(
+        'Finish onboarding first',
+        'Complete your UCC registration to start investing. It takes about 3 minutes.',
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Start now', onPress: () => router.push('/onboarding') },
+        ],
+      );
+      return;
+    }
+    fn();
+  };
 
   // Load Supabase fund meta (score, returns) + BSE scheme detail (limits).
   useEffect(() => {
@@ -131,6 +166,17 @@ export default function FundDetail() {
             </View>
             <ScoreBadge score={score} />
           </View>
+        </Card>
+
+        {/* NAV trend chart */}
+        <Text
+          className="text-[10px] font-bold uppercase tracking-widest mb-2 ml-1"
+          style={{ color: t.textSecondary }}
+        >
+          NAV trend
+        </Text>
+        <Card padding={16} style={{ marginBottom: 14 }}>
+          {isin ? <NavChart isin={String(isin)} width={width} /> : null}
         </Card>
 
         {/* Returns grid */}
@@ -248,7 +294,7 @@ export default function FundDetail() {
         }}
       >
         <Pressable
-          onPress={() => setMode('redeem')}
+          onPress={() => guardOrRun(() => setMode('redeem'))}
           disabled={!scheme}
           style={{
             paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14,
@@ -263,7 +309,7 @@ export default function FundDetail() {
           </Text>
         </Pressable>
         <Pressable
-          onPress={() => setMode('lumpsum')}
+          onPress={() => guardOrRun(() => setMode('lumpsum'))}
           disabled={!scheme}
           style={{
             flex: 1, paddingVertical: 14, borderRadius: 14,
@@ -275,7 +321,7 @@ export default function FundDetail() {
           <Text className="text-white font-semibold">Lumpsum</Text>
         </Pressable>
         <Pressable
-          onPress={() => setMode('sip')}
+          onPress={() => guardOrRun(() => setMode('sip'))}
           disabled={!scheme?.systematic}
           style={{
             flex: 1, paddingVertical: 14, borderRadius: 14,
