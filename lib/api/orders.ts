@@ -117,3 +117,28 @@ export function getSipAuthLink(token: string, sipId: string) {
     token,
   );
 }
+
+// ─── Redeem ────────────────────────────────────────────────────────────────
+export type RedeemBody = {
+  scheme_code: string;
+  scheme_name?: string;
+  isin?: string;
+  folio_num: string;
+  units?: number;
+  is_units?: boolean;
+  all_units?: boolean;
+};
+
+export function placeRedeem(token: string, body: RedeemBody) {
+  return req<{
+    success: boolean;
+    order_id?: string;
+    mem_ord_ref_id?: string;
+    bse_order_id?: string;
+    auth_url?: string;
+    message: string;
+  }>('/api/v1/orders/redeem', token, {
+    method: 'POST',
+    body: JSON.stringify({ is_units: true, all_units: false, units: 0, ...body }),
+  });
+}

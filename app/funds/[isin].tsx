@@ -14,7 +14,7 @@ import {
 import { useLocalSearchParams, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
-import { TrendingUp, Wallet, Calendar, Repeat, Clock, X, Info, Heart } from 'lucide-react-native';
+import { TrendingUp, Wallet, Calendar, Repeat, Clock, X, Info, Heart, Banknote } from 'lucide-react-native';
 import ScreenHeader from '../../components/ui/ScreenHeader';
 import { useWatchlist } from '../../lib/hooks/useWatchlist';
 import Card from '../../components/ui/Card';
@@ -29,9 +29,10 @@ import {
   getPaymentLink,
   placeSip,
   getSipAuthLink,
+  placeRedeem,
 } from '../../lib/api/orders';
 
-type Mode = null | 'lumpsum' | 'sip';
+type Mode = null | 'lumpsum' | 'sip' | 'redeem';
 
 export default function FundDetail() {
   const t = useTheme();
@@ -236,16 +237,31 @@ export default function FundDetail() {
         ) : null}
       </ScrollView>
 
-      {/* Invest CTA bar */}
+      {/* Action bar */}
       <View
         style={{
           position: 'absolute', left: 0, right: 0, bottom: 0,
           backgroundColor: t.card,
           borderTopColor: t.border, borderTopWidth: 1,
           padding: 14, paddingBottom: 28,
-          flexDirection: 'row', gap: 10,
+          flexDirection: 'row', gap: 8,
         }}
       >
+        <Pressable
+          onPress={() => setMode('redeem')}
+          disabled={!scheme}
+          style={{
+            paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14,
+            backgroundColor: scheme ? t.card : t.border,
+            borderWidth: 1, borderColor: scheme ? '#ef4444' : t.border,
+            alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6,
+          }}
+        >
+          <Banknote size={15} color={scheme ? '#ef4444' : t.textSecondary} />
+          <Text style={{ color: scheme ? '#ef4444' : t.textSecondary, fontWeight: '600', fontSize: 13 }}>
+            Redeem
+          </Text>
+        </Pressable>
         <Pressable
           onPress={() => setMode('lumpsum')}
           disabled={!scheme}
@@ -272,13 +288,185 @@ export default function FundDetail() {
         </Pressable>
       </View>
 
-      {/* Invest modal */}
+      {/* Invest / Redeem modals */}
       <InvestModal
-        mode={mode}
+        mode={mode === 'lumpsum' || mode === 'sip' ? mode : null}
+        scheme={scheme}
+        onClose={() => setMode(null)}
+      />
+      <RedeemModal
+        visible={mode === 'redeem'}
         scheme={scheme}
         onClose={() => setMode(null)}
       />
     </View>
+  );
+}
+
+// ── Redeem modal ─────────────────────────────────────────────────────────────
+
+function RedeemModal({
+  visible, scheme, onClose,
+}: {
+  visible: boolean;
+  scheme: SchemeDetail | null;
+  onClose: () => void;
+}) {
+  const t = useTheme();
+  const { accessToken } = useSession();
+  const [folio, setFolio] = useState('');
+  const [units, setUnits] = useState('');
+  const [allUnits, setAllUnits] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (visible) { setFolio(''); setUnits(''); setAllUnits(true); }
+  }, [visible]);
+
+  if (!visible || !scheme) return null;
+
+  const valid = folio.trim().length >= 3 && (allUnits || Number(units) > 0);
+
+  const submit = async () => {
+    if (!valid || !accessToken || !scheme.bse_code) return;
+    setSubmitting(true);
+    try {
+      const res = await placeRedeem(accessToken, {
+        scheme_code: scheme.bse_code,
+        scheme_name: scheme.name,
+        isin: scheme.isin,
+        folio_num: folio.trim(),
+        all_units: allUnits,
+        is_units: true,
+        units: allUnits ? 0 : Number(units) || 0,
+      });
+      onClose();
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (res.auth_url) {
+        await WebBrowser.openBrowserAsync(res.auth_url);
+      } else {
+        Alert.alert(
+          res.success ? 'Redemption placed' : 'Heads up',
+          res.message || 'Your redemption has been submitted. Check Orders for status.',
+        );
+      }
+    } catch (e) {
+      Alert.alert('Redemption failed', (e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal animationType="slide" transparent visible onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View
+            style={{
+              backgroundColor: t.card,
+              borderTopLeftRadius: 24, borderTopRightRadius: 24,
+              padding: 20, paddingBottom: 36,
+            }}
+          >
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="text-lg font-bold" style={{ color: t.textPrimary }}>
+                Redeem units
+              </Text>
+              <Pressable onPress={onClose} hitSlop={10}>
+                <X size={18} color={t.textSecondary} />
+              </Pressable>
+            </View>
+
+            <Text className="text-[12px] mb-1.5 ml-1" style={{ color: t.textSecondary }}>
+              Folio number
+            </Text>
+            <TextInput
+              value={folio}
+              onChangeText={setFolio}
+              placeholder="e.g. 1234567 / 00"
+              placeholderTextColor={t.textSecondary}
+              autoCapitalize="none"
+              style={{
+                backgroundColor: t.bg,
+                borderColor: t.border, borderWidth: 1, borderRadius: 14,
+                paddingHorizontal: 14, paddingVertical: 12,
+                color: t.textPrimary, fontSize: 15, fontWeight: '600',
+              }}
+            />
+
+            <View className="flex-row items-center gap-2 mt-4">
+              <Pressable
+                onPress={() => setAllUnits(true)}
+                style={{
+                  flex: 1, paddingVertical: 10, borderRadius: 12,
+                  backgroundColor: allUnits ? '#ef4444' : t.bg,
+                  borderColor: allUnits ? '#ef4444' : t.border, borderWidth: 1,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: allUnits ? '#ffffff' : t.textPrimary, fontWeight: '600' }}>
+                  All units
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setAllUnits(false)}
+                style={{
+                  flex: 1, paddingVertical: 10, borderRadius: 12,
+                  backgroundColor: !allUnits ? '#ef4444' : t.bg,
+                  borderColor: !allUnits ? '#ef4444' : t.border, borderWidth: 1,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: !allUnits ? '#ffffff' : t.textPrimary, fontWeight: '600' }}>
+                  Specific units
+                </Text>
+              </Pressable>
+            </View>
+
+            {!allUnits && (
+              <>
+                <Text className="text-[12px] mt-4 mb-1.5 ml-1" style={{ color: t.textSecondary }}>
+                  Units to redeem
+                </Text>
+                <TextInput
+                  keyboardType="decimal-pad"
+                  value={units}
+                  onChangeText={setUnits}
+                  placeholder="e.g. 100.000"
+                  placeholderTextColor={t.textSecondary}
+                  style={{
+                    backgroundColor: t.bg,
+                    borderColor: t.border, borderWidth: 1, borderRadius: 14,
+                    paddingHorizontal: 14, paddingVertical: 12,
+                    color: t.textPrimary, fontSize: 18, fontWeight: '700',
+                  }}
+                />
+              </>
+            )}
+
+            <Pressable
+              onPress={submit}
+              disabled={!valid || submitting}
+              style={{
+                marginTop: 18, paddingVertical: 14, borderRadius: 14,
+                backgroundColor: !valid || submitting ? t.border : '#ef4444',
+                alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8,
+              }}
+            >
+              {submitting ? <ActivityIndicator color="#ffffff" /> : (
+                <>
+                  <Banknote size={16} color="#ffffff" />
+                  <Text className="text-white font-semibold">Submit redemption</Text>
+                </>
+              )}
+            </Pressable>
+            <Text className="text-[10px] text-center mt-3" style={{ color: t.textSecondary }}>
+              Redemptions settle to your registered bank account in 2–3 business days.
+            </Text>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
   );
 }
 
@@ -319,7 +507,7 @@ function Metric({
 function InvestModal({
   mode, scheme, onClose,
 }: {
-  mode: Mode;
+  mode: 'lumpsum' | 'sip' | null;
   scheme: SchemeDetail | null;
   onClose: () => void;
 }) {

@@ -42,8 +42,17 @@ export default function OrdersScreen() {
       <ScreenHeader title="My Orders" subtitle={`${orders.length} total`} />
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={t.brand} />
+        <View style={{ padding: 20, gap: 10 }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <View
+              key={i}
+              style={{
+                height: 90, borderRadius: 16,
+                backgroundColor: t.card, borderColor: t.border, borderWidth: 1,
+                opacity: 0.6,
+              }}
+            />
+          ))}
         </View>
       ) : (
         <FlatList

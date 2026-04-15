@@ -11,7 +11,7 @@
  *  - Stop button tears everything down cleanly.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, Alert, Platform } from 'react-native';
+import { View, Text, Pressable, Alert, Platform, AppState } from 'react-native';
 import { Mic, Square, Globe, Volume2, Loader2 } from 'lucide-react-native';
 import Animated, {
   useSharedValue,
@@ -222,6 +222,19 @@ export default function VoiceBar() {
       if (file.exists) file.delete();
       file.write(tts.audio_base64, { encoding: 'base64' });
 
+      // Re-arm the recorder during TTS playback so the meter loop can
+      // detect barge-in (user starts speaking while Tara is talking).
+      // We discard the resulting file — only metering matters here.
+      try {
+        if (!recorder.isRecording) {
+          await recorder.prepareToRecordAsync({
+            ...RecordingPresets.HIGH_QUALITY,
+            isMeteringEnabled: true,
+          });
+          recorder.record();
+        }
+      } catch { /* metering is best-effort during speaking */ }
+
       // Tear down any prior player
       try { currentPlayerRef.current?.remove(); } catch { /* ignore */ }
 
@@ -261,18 +274,58 @@ export default function VoiceBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken]);
 
-  // ── Silence-detection ticker ─────────────────────────────────────────────
+  // Barge-in detection threshold while Tara is speaking. Slightly higher
+  // than DB_SPEECH so we don't trip on echo / ambient noise.
+  const DB_BARGE = -22;
+  const bargeStartAtRef = useRef<number | null>(null);
+
+  /**
+   * Cleanly stop TTS playback and pivot back to listening — used both for
+   * barge-in (user interrupted) and for the explicit Stop button.
+   */
+  const interruptTts = useCallback(async () => {
+    try { abortCtrlRef.current?.abort(); } catch {}
+    try {
+      const p = currentPlayerRef.current;
+      if (p) { p.pause(); p.remove(); }
+    } catch {}
+    currentPlayerRef.current = null;
+    turnInFlightRef.current = false;
+    if (sessionActiveRef.current) await startListening();
+  }, []);
+
+  // ── Silence-detection + barge-in ticker ──────────────────────────────────
   const startMeterLoop = useCallback(() => {
     if (meterTimerRef.current) clearInterval(meterTimerRef.current);
     meterTimerRef.current = setInterval(async () => {
       if (!sessionActiveRef.current) return;
-      if (turnInFlightRef.current) return;
-      if (phaseRef.current !== 'listening') return;
 
       const status = recorder.getStatus();
       const db = status?.metering ?? -80;      // dBFS, typically -80..0
       const norm = Math.max(0, Math.min(1, (db + 60) / 60));
       level.value = withTiming(norm, { duration: TICK_MS });
+
+      // Barge-in: while Tara is speaking, watch for user voice and pivot
+      // back to listening if they start talking. Requires ~250ms of
+      // sustained voice so we don't false-trigger on a cough.
+      if (phaseRef.current === 'speaking') {
+        const now = Date.now();
+        if (db > DB_BARGE) {
+          if (bargeStartAtRef.current == null) bargeStartAtRef.current = now;
+          if (now - bargeStartAtRef.current >= 250) {
+            bargeStartAtRef.current = null;
+            await interruptTts();
+          }
+        } else {
+          bargeStartAtRef.current = null;
+        }
+        return;
+      }
+
+      // Don't run silence-detection while a turn is in flight (we're
+      // mid-STT/chat/TTS) or when we're not actively listening.
+      if (turnInFlightRef.current) return;
+      if (phaseRef.current !== 'listening') return;
 
       const now = Date.now();
       if (db > DB_SPEECH) {
@@ -287,7 +340,7 @@ export default function VoiceBar() {
         }
       }
     }, TICK_MS);
-  }, [recorder, level]);
+  }, [recorder, level, interruptTts]);
 
   const stopMeterLoop = () => {
     if (meterTimerRef.current) {
@@ -401,6 +454,30 @@ export default function VoiceBar() {
     return () => { teardown(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Audio-session restoration — when the app comes back from background
+  // (e.g. after a phone call interrupted us), re-arm the recorder if a
+  // session is supposed to be active but the recorder fell over.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state !== 'active') return;
+      if (!sessionActiveRef.current) return;
+      if (turnInFlightRef.current) return;
+      // If we're still in 'listening' but the recorder isn't actually
+      // recording (iOS can suspend it), restart it cleanly.
+      if (phaseRef.current === 'listening' && !recorder.isRecording) {
+        try {
+          await setAudioModeAsync({
+            playsInSilentMode: true,
+            allowsRecording: true,
+            shouldPlayInBackground: false,
+          });
+          await startListening();
+        } catch { /* ignore */ }
+      }
+    });
+    return () => sub.remove();
+  }, [recorder, startListening]);
 
   // ── Pickers ──────────────────────────────────────────────────────────────
   const pickLanguage = () => {

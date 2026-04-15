@@ -137,7 +137,8 @@ function Shell() {
               <Stack.Screen name="funds/[isin]" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="orders" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="sips" options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="compare" options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="compare"   options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="mandates"  options={{ animation: 'slide_from_right' }} />
               <Stack.Screen
                 name="risk-assessment"
                 options={{ presentation: 'modal', animation: 'slide_from_bottom' }}

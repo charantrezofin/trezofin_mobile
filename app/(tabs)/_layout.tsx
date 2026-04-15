@@ -1,11 +1,20 @@
 import { Tabs } from 'expo-router';
 import { Home, PieChart, MessageCircle, User } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { Platform } from 'react-native';
 import { useTheme } from '../../lib/theme/ThemeProvider';
+
+const tabPress = () => {
+  if (Platform.OS !== 'web') {
+    Haptics.selectionAsync().catch(() => {});
+  }
+};
 
 export default function TabsLayout() {
   const t = useTheme();
   return (
     <Tabs
+      screenListeners={{ tabPress }}
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
