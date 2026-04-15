@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronRight, LogOut, Shield, Moon, Sun, Monitor, Globe, Volume2, Mail, Wallet, Repeat, RefreshCw, Fingerprint, ShieldCheck, UserCheck } from 'lucide-react-native';
+import { ChevronRight, LogOut, Shield, Moon, Sun, Monitor, Globe, Volume2, Mail, Wallet, RefreshCw, Fingerprint, ShieldCheck, UserCheck, BadgeCheck, AlertTriangle, Clock } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { supabase } from '../../lib/supabase/client';
 import { getUserProfile, type UserProfile } from '../../lib/api/client';
+import { getProfileFull, type ProfileFull } from '../../lib/api/profile';
 import { useSession } from '../../lib/hooks/useSession';
 import { useTheme, useThemePref, type ThemePref } from '../../lib/theme/ThemeProvider';
 import { useBiometricLock } from '../../lib/hooks/useBiometricLock';
@@ -23,6 +24,7 @@ export default function Profile() {
   const { accessToken } = useSession();
   const bio = useBiometricLock();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [uccProfile, setUccProfile] = useState<ProfileFull | null>(null);
   const [loading, setLoading] = useState(true);
   const [lang, setLang]       = useState(DEFAULT_LANGUAGE_CODE);
   const [speaker, setSpeaker] = useState(DEFAULT_SPEAKER_ID);
@@ -41,10 +43,14 @@ export default function Profile() {
     let cancelled = false;
     (async () => {
       try {
-        const p = await getUserProfile(accessToken);
-        if (!cancelled) setProfile(p);
-      } catch (e) {
-        console.warn('profile load failed:', (e as Error).message);
+        const [p, ucc] = await Promise.all([
+          getUserProfile(accessToken).catch(() => null),
+          getProfileFull(accessToken).catch(() => null),
+        ]);
+        if (!cancelled) {
+          if (p) setProfile(p);
+          if (ucc) setUccProfile(ucc);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -120,9 +126,12 @@ export default function Profile() {
             <View className="flex-row items-center gap-4">
               <Avatar name={fullName} size={56} color={t.brand} />
               <View style={{ flex: 1 }}>
-                <Text className="text-lg font-bold" style={{ color: t.textPrimary }}>
-                  {fullName}
-                </Text>
+                <View className="flex-row items-center gap-2 flex-wrap">
+                  <Text className="text-lg font-bold" style={{ color: t.textPrimary }}>
+                    {fullName}
+                  </Text>
+                  <KycChip status={uccProfile?.status} />
+                </View>
                 <View className="flex-row items-center gap-1.5 mt-0.5">
                   <Mail size={12} color={t.textSecondary} />
                   <Text className="text-[13px]" style={{ color: t.textSecondary }} numberOfLines={1}>
@@ -179,16 +188,9 @@ export default function Profile() {
         <Card padding={0} style={{ marginBottom: 24, overflow: 'hidden' }}>
           <SettingRow
             icon={<Wallet size={18} color={t.brand} />}
-            title="My Orders"
-            value="Lumpsum purchases & status"
+            title="My Orders & SIPs"
+            value="All orders, lumpsum & SIPs in one place"
             onPress={() => router.push('/orders')}
-          />
-          <Divider />
-          <SettingRow
-            icon={<Repeat size={18} color={t.brand} />}
-            title="My SIPs"
-            value="Active & pending SIPs"
-            onPress={() => router.push('/sips')}
           />
           <Divider />
           <SettingRow
@@ -201,7 +203,7 @@ export default function Profile() {
           <SettingRow
             icon={<UserCheck size={18} color={t.brand} />}
             title="Onboarding (UCC / KYC)"
-            value="PAN, bank, address, FATCA"
+            value={uccProfile?.status === 'active' ? 'Completed' : 'PAN, bank, address, FATCA'}
             onPress={() => router.push('/onboarding')}
           />
         </Card>
@@ -325,4 +327,54 @@ function SettingRow({
 function Divider() {
   const t = useTheme();
   return <View style={{ height: 1, backgroundColor: t.border, marginLeft: 64 }} />;
+}
+
+/**
+ * Small inline chip next to the user's name that reflects their UCC / KYC
+ * status at a glance.
+ *
+ *   active         -> green tick + "KYC verified"
+ *   ucc_submitted  -> amber clock + "Pending 2FA"
+ *   (everything else, incl. undefined / null) -> amber warning + "Not verified"
+ */
+function KycChip({ status }: { status?: string | null }) {
+  const s = status ?? 'pending';
+  if (s === 'active') {
+    return (
+      <View
+        className="flex-row items-center gap-1 px-2 py-0.5 rounded-full"
+        style={{ backgroundColor: '#10b98122' }}
+      >
+        <BadgeCheck size={11} color="#10b981" />
+        <Text style={{ color: '#10b981', fontSize: 10, fontWeight: '800', letterSpacing: 0.4 }}>
+          VERIFIED
+        </Text>
+      </View>
+    );
+  }
+  if (s === 'ucc_submitted') {
+    return (
+      <View
+        className="flex-row items-center gap-1 px-2 py-0.5 rounded-full"
+        style={{ backgroundColor: '#38bdf822' }}
+      >
+        <Clock size={11} color="#0ea5e9" />
+        <Text style={{ color: '#0ea5e9', fontSize: 10, fontWeight: '800', letterSpacing: 0.4 }}>
+          PENDING 2FA
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={() => router.push('/onboarding')}
+      className="flex-row items-center gap-1 px-2 py-0.5 rounded-full"
+      style={{ backgroundColor: '#f59e0b22' }}
+    >
+      <AlertTriangle size={11} color="#b45309" />
+      <Text style={{ color: '#b45309', fontSize: 10, fontWeight: '800', letterSpacing: 0.4 }}>
+        NOT VERIFIED
+      </Text>
+    </Pressable>
+  );
 }

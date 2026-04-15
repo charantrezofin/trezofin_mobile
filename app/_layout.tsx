@@ -136,7 +136,6 @@ function Shell() {
               <Stack.Screen name="auth/login" />
               <Stack.Screen name="funds/[isin]" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="orders" options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="sips" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="compare"   options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="mandates"  options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="onboarding" options={{ animation: 'slide_from_right' }} />
