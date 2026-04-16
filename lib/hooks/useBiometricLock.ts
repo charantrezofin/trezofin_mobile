@@ -27,10 +27,19 @@ export function useBiometricLock() {
   // Initial load
   useEffect(() => {
     (async () => {
-      const [has, enrolled] = await Promise.all([
+      const [has, enrolled, types] = await Promise.all([
         LA.hasHardwareAsync(),
         LA.isEnrolledAsync(),
+        LA.supportedAuthenticationTypesAsync(),
       ]);
+      // Diagnostic — if `types` does NOT include FACIAL_RECOGNITION on a
+      // Face ID phone, you're almost certainly running in Expo Go. Expo
+      // Go's own bundle doesn't ship with a Face ID entitlement, so iOS
+      // blocks the biometric call and falls straight to passcode. The
+      // fix is a development build (`eas build --profile development
+      // --platform ios`) — then FaceID will actually work.
+      console.log('[biometric] hw=', has, 'enrolled=', enrolled,
+        'types=', types, '(1=Touch, 2=Face, 3=Iris)');
       setAvailable(has && enrolled);
       const v = await AsyncStorage.getItem(ENABLED_KEY);
       const on = v === '1';
@@ -56,20 +65,43 @@ export function useBiometricLock() {
   }, [enabled, available]);
 
   const authenticate = useCallback(async () => {
-    const res = await LA.authenticateAsync({
+    // Two-step unlock: try biometric alone first (no passcode UI, no leak
+    // of the device PIN surface). Only if the biometric attempt fails or
+    // the user taps "Use passcode" do we fall through to the device
+    // passcode sheet. This matches Apple/Google's native pattern and
+    // avoids the "asks password every time" issue we had when fallback
+    // was enabled on the very first attempt.
+    const bio = await LA.authenticateAsync({
       promptMessage: 'Unlock Trezofin AI',
-      fallbackLabel: 'Use passcode',
+      cancelLabel: 'Use device passcode',
+      disableDeviceFallback: true,
+    });
+    if (bio.success) {
+      setLocked(false);
+      return true;
+    }
+
+    // Biometric didn't succeed — offer device passcode as a second step.
+    // `error` is 'user_cancel' if they explicitly backed out; we still try
+    // because the cancel label we showed is literally "Use device passcode".
+    const pc = await LA.authenticateAsync({
+      promptMessage: 'Unlock with device passcode',
       disableDeviceFallback: false,
     });
-    if (res.success) setLocked(false);
-    return res.success;
+    if (pc.success) setLocked(false);
+    return pc.success;
   }, []);
 
   const setEnabled = useCallback(async (on: boolean) => {
     if (on) {
       if (!available) return false;
-      // Confirm with a biometric prompt before turning on
-      const r = await LA.authenticateAsync({ promptMessage: 'Enable biometric lock' });
+      // Confirm with biometric before turning on; allow passcode as a
+      // fallback so a flaky Face ID scan doesn't block enabling the feature.
+      const r = await LA.authenticateAsync({
+        promptMessage: 'Enable biometric lock',
+        cancelLabel: 'Cancel',
+        disableDeviceFallback: false,
+      });
       if (!r.success) return false;
     }
     setEnabledState(on);

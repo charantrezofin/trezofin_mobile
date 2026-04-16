@@ -242,24 +242,32 @@ export default function VoiceBar() {
         encoding: LegacyFS.EncodingType.Base64,
       });
 
-      // Re-arm the recorder during TTS playback so the meter loop can
-      // detect barge-in (user starts speaking while Tara is talking).
-      // We discard the resulting file — only metering matters here.
-      try {
-        if (!recorder.isRecording) {
-          await recorder.prepareToRecordAsync({
-            ...RecordingPresets.HIGH_QUALITY,
-            isMeteringEnabled: true,
-          });
-          recorder.record();
-        }
-      } catch { /* metering is best-effort during speaking */ }
+      // NOTE: We intentionally DO NOT re-arm the recorder during TTS
+      // playback anymore. Keeping the audio session in record+play mode
+      // routed iOS output to the earpiece, making replies inaudible. The
+      // trade-off is we lose real-time barge-in — users tap Stop or wait
+      // for the reply to finish. Worth it for audible speech in phase 1.
 
       // Tear down any prior player
       try { currentPlayerRef.current?.remove(); } catch { /* ignore */ }
 
+      // iOS routes audio to the EARPIECE (not the loudspeaker) whenever
+      // `allowsRecording` is true on the audio session. That's why Tara
+      // sounded like a faint phone-call instead of a normal reply. Before
+      // we play, flip the session into playback-only mode so it routes to
+      // the main speaker at full volume.
+      try {
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          allowsRecording: false,
+          shouldPlayInBackground: false,
+        });
+      } catch { /* best-effort */ }
+
       const player = createAudioPlayer({ uri: fileUri });
       currentPlayerRef.current = player;
+      // Max client-side volume on top of backend loudness=3.0.
+      try { (player as unknown as { volume: number }).volume = 1.0; } catch {}
 
       setPhase('speaking');
       if (Platform.OS !== 'web') {
@@ -280,6 +288,16 @@ export default function VoiceBar() {
 
       try { player.remove(); } catch { /* ignore */ }
       if (currentPlayerRef.current === player) currentPlayerRef.current = null;
+
+      // Flip the audio session back to record+play so the next listening
+      // turn can actually capture mic input.
+      try {
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          allowsRecording: true,
+          shouldPlayInBackground: false,
+        });
+      } catch { /* best-effort */ }
 
       turnInFlightRef.current = false;
       if (sessionActiveRef.current) await startListening();
@@ -716,7 +734,9 @@ export default function VoiceBar() {
             )}
           </View>
 
-          {/* Diagnostic + manual Send (only while listening) */}
+          {/* Listening status + explicit Send button. Auto-send still fires
+              after 2s silence, but users shouldn't have to guess when to
+              stop — tapping Send is the clearer primary action. */}
           {phase === 'listening' && (
             <View className="flex-row items-center justify-between mt-3 gap-3">
               <View className="flex-row items-center gap-2" style={{ flex: 1 }}>
@@ -733,7 +753,7 @@ export default function VoiceBar() {
               </View>
               <Pressable
                 onPress={() => finaliseChunk()}
-                className="px-3 py-1.5 rounded-full"
+                className="px-4 py-2 rounded-full"
                 style={{
                   backgroundColor: spokeDetected ? t.brand : 'rgba(255,255,255,0.12)',
                 }}
@@ -741,10 +761,10 @@ export default function VoiceBar() {
                 <Text
                   style={{
                     color: spokeDetected ? '#ffffff' : t.textOnVoiceMuted,
-                    fontSize: 11, fontWeight: '700',
+                    fontSize: 12, fontWeight: '700',
                   }}
                 >
-                  Send now
+                  Send
                 </Text>
               </Pressable>
             </View>
