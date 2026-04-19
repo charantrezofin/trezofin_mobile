@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, Alert, Platform, AppState } from 'react-native';
-import { Mic, Square, Globe, Volume2, Loader2 } from 'lucide-react-native';
+import { Mic, Square, Globe, Volume2, Loader2, Cpu } from 'lucide-react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -50,9 +50,13 @@ import {
   getLanguageByCode,
 } from '../../lib/constants/languages';
 import {
-  SARVAM_SPEAKERS,
-  DEFAULT_SPEAKER_ID,
-} from '../../lib/constants/speakers';
+  PROVIDERS,
+  DEFAULT_PROVIDER,
+  resolveProvider,
+  getVoicesFor,
+  getDefaultVoice,
+  type ProviderId,
+} from '../../lib/constants/providers';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 
@@ -65,8 +69,12 @@ const MIN_SPEECH_MS    =  400;  // require this much speech before arming silenc
 // barge-in so TTS playback doesn't mis-interrupt itself.
 const DB_SPEECH        =  -46;  // tuned on real device: normal speech reads ~-44 dB at arm's length
 const TICK_MS          =  120;  // metering poll interval
+// Drop chunks with less than this much real speech — almost certainly noise.
+// Cheap guard that saves a round-trip to the backend.
+const MIN_REAL_SPEECH_MS = 700;
 const LANG_KEY         = 'trezofin_voice_lang';
 const SPEAKER_KEY      = 'trezofin_voice_speaker';
+const PROVIDER_KEY     = 'trezofin_voice_provider';
 
 const BAR_COUNT = 21;
 
@@ -79,17 +87,38 @@ export default function VoiceBar() {
   const [sessionActive, setSessionActive] = useState(false);
   const [errMsg, setErrMsg]            = useState<string | null>(null);
   const [lang, setLang]                = useState(DEFAULT_LANGUAGE_CODE);
-  const [speaker, setSpeaker]          = useState(DEFAULT_SPEAKER_ID);
+  const [provider, setProviderState]   = useState<ProviderId>(DEFAULT_PROVIDER);
+  const [speaker, setSpeaker]          = useState<string>(
+    () => getDefaultVoice(DEFAULT_PROVIDER, DEFAULT_LANGUAGE_CODE) ?? '',
+  );
   const [liveDb, setLiveDb]            = useState<number | null>(null);   // shown in diagnostic bar
   const [spokeDetected, setSpokeDetected] = useState(false);              // flips true once we've seen >DB_SPEECH
+
+  // The effective provider we actually call the backend with — resolves "auto"
+  // to a concrete provider based on the current language.
+  const effectiveProvider = resolveProvider(provider, lang);
+
+  // Voice list for the currently-effective provider + language.
+  const availableVoices = getVoicesFor(effectiveProvider, lang);
 
   // Load persisted prefs
   useEffect(() => {
     (async () => {
       const l = await SecureStore.getItemAsync(LANG_KEY);
+      const initialLang = l || DEFAULT_LANGUAGE_CODE;
       if (l) setLang(l);
+
+      const p = (await SecureStore.getItemAsync(PROVIDER_KEY)) as ProviderId | null;
+      const validProvider = p && PROVIDERS.some((x) => x.id === p) ? p : DEFAULT_PROVIDER;
+      if (validProvider !== DEFAULT_PROVIDER) setProviderState(validProvider);
+
+      // Speaker is honoured only if it still exists under the RESOLVED
+      // provider for the saved language.
+      const effective = resolveProvider(validProvider, initialLang);
+      const voices = getVoicesFor(effective, initialLang);
       const s = await SecureStore.getItemAsync(SPEAKER_KEY);
-      if (s) setSpeaker(s);
+      const spkValid = s && voices.some((v) => v.id === s);
+      setSpeaker(spkValid ? s! : (voices[0]?.id ?? ''));
     })();
   }, []);
 
@@ -98,6 +127,9 @@ export default function VoiceBar() {
   const phaseRef          = useRef<Phase>('idle');
   const langRef           = useRef(lang);
   const speakerRef        = useRef(speaker);
+  // Holds the RESOLVED provider (never "auto") so in-flight turns always
+  // hit a concrete provider regardless of what the user has selected.
+  const providerRef       = useRef<Exclude<ProviderId, 'auto'>>(effectiveProvider);
   const historyRef        = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const userContextRef    = useRef<string | null>(null);
 
@@ -113,6 +145,9 @@ export default function VoiceBar() {
   useEffect(() => { langRef.current    = lang;    }, [lang]);
   useEffect(() => { speakerRef.current = speaker; }, [speaker]);
   useEffect(() => { phaseRef.current   = phase;   }, [phase]);
+  // providerRef always holds the RESOLVED provider — update whenever either
+  // the user's provider pick or the language changes.
+  useEffect(() => { providerRef.current = effectiveProvider; }, [effectiveProvider]);
 
   // ── Recorder (expo-audio) ────────────────────────────────────────────────
   const recorder = useAudioRecorder({
@@ -168,9 +203,14 @@ export default function VoiceBar() {
     const { signal } = ctrl;
 
     try {
-      // STT
-      console.log('[voice] STT → uri=', uri, 'mime=', mimeType);
-      const stt = await transcribeAudio(accessToken, uri, mimeType, 'unknown', { signal });
+      // STT — Sarvam supports "unknown" (auto-detect) but Google/Azure prefer
+      // an explicit language. Use the UI language for non-Sarvam providers.
+      console.log('[voice] STT → uri=', uri, 'mime=', mimeType, 'provider=', providerRef.current);
+      const sttLang = providerRef.current === 'sarvam' ? 'unknown' : langRef.current;
+      const stt = await transcribeAudio(accessToken, uri, mimeType, sttLang, {
+        signal,
+        provider: providerRef.current,
+      });
       const userText = stt.transcribed_text?.trim();
       console.log('[voice] STT result:', userText, 'lang=', stt.detected_language);
       if (!userText || userText.length < 2) {
@@ -195,6 +235,7 @@ export default function VoiceBar() {
         outputLanguage: outputLang,
         history: historyRef.current,
         userContext: userContextRef.current,
+        provider: providerRef.current,
       });
       const replyText = chat.response_text?.trim();
       console.log('[voice] chat reply:', replyText?.slice(0, 80));
@@ -229,15 +270,21 @@ export default function VoiceBar() {
       const tts = await speakText(accessToken, replyText, outputLang, {
         signal,
         speaker: speakerRef.current,
+        provider: providerRef.current,
       });
 
       if (!sessionActiveRef.current) return;
 
       // Write base64 → cache file, then play via expo-audio.
       // Each turn uses a fresh filename to defeat expo-audio's source cache.
+      // Extension matters on iOS — Sarvam returns WAV, Google/Azure return MP3.
       const cacheDir = LegacyFS.cacheDirectory ?? LegacyFS.documentDirectory;
       if (!cacheDir) throw new Error('No cache directory available');
-      const fileUri = `${cacheDir}tara-tts-${Date.now()}.wav`;
+      const ct = (tts.content_type || '').toLowerCase();
+      const ext = ct.includes('mpeg') || ct.includes('mp3') ? 'mp3'
+                : ct.includes('ogg') ? 'ogg'
+                : 'wav';
+      const fileUri = `${cacheDir}tara-tts-${Date.now()}.${ext}`;
       await LegacyFS.writeAsStringAsync(fileUri, tts.audio_base64, {
         encoding: LegacyFS.EncodingType.Base64,
       });
@@ -435,6 +482,21 @@ export default function VoiceBar() {
 
   const finaliseChunk = useCallback(async () => {
     if (!recorder.isRecording) return;
+
+    // Duration guard: if the user barely spoke, it was almost certainly noise.
+    // Discard and keep listening instead of burning an STT round-trip that
+    // will come back with a garbage transcript and a broken-sounding reply.
+    const start = speechStartAtRef.current;
+    const end   = silenceStartAtRef.current;
+    if (start != null && end != null && (end - start) < MIN_REAL_SPEECH_MS) {
+      console.log('[voice] dropping chunk — only', end - start, 'ms of real speech');
+      speechStartAtRef.current = null;
+      silenceStartAtRef.current = null;
+      setSpokeDetected(false);
+      // Keep listening — no need to tear down/rebuild the recorder here.
+      return;
+    }
+
     stopMeterLoop();
     try {
       await recorder.stop();
@@ -556,18 +618,47 @@ export default function VoiceBar() {
         onPress: async () => {
           setLang(l.code);
           await SecureStore.setItemAsync(LANG_KEY, l.code);
+          // When the user is on Auto or the new language isn't supported by
+          // the current voice, reset to the new provider+language default.
+          const newEffective = resolveProvider(provider, l.code);
+          const newVoices = getVoicesFor(newEffective, l.code);
+          const stillValid = newVoices.some((v) => v.id === speaker);
+          if (!stillValid) {
+            const def = newVoices[0]?.id ?? '';
+            setSpeaker(def);
+            if (def) await SecureStore.setItemAsync(SPEAKER_KEY, def);
+          }
+        },
+      })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
+  const pickProvider = () => {
+    Alert.alert('AI provider', 'Route voice to:', [
+      ...PROVIDERS.map((p) => ({
+        text: `${p.label} · ${p.tagline}`,
+        onPress: async () => {
+          setProviderState(p.id);
+          await SecureStore.setItemAsync(PROVIDER_KEY, p.id);
+          // Different providers have different voice catalogues — reset to
+          // the new effective provider's default for the current language.
+          const effective = resolveProvider(p.id, lang);
+          const def = getDefaultVoice(effective, lang) ?? '';
+          setSpeaker(def);
+          if (def) await SecureStore.setItemAsync(SPEAKER_KEY, def);
         },
       })),
       { text: 'Cancel', style: 'cancel' as const },
     ]);
   };
   const pickSpeaker = () => {
+    if (availableVoices.length === 0) return;
     Alert.alert('Voice', 'Pick a voice:', [
-      ...SARVAM_SPEAKERS.map((s) => ({
-        text: `${s.label} · ${s.gender} · ${s.tone}`,
+      ...availableVoices.map((v) => ({
+        text: v.label,
         onPress: async () => {
-          setSpeaker(s.id);
-          await SecureStore.setItemAsync(SPEAKER_KEY, s.id);
+          setSpeaker(v.id);
+          await SecureStore.setItemAsync(SPEAKER_KEY, v.id);
         },
       })),
       { text: 'Cancel', style: 'cancel' as const },
@@ -576,7 +667,13 @@ export default function VoiceBar() {
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const langObj = getLanguageByCode(lang);
-  const spkObj  = SARVAM_SPEAKERS.find((s) => s.id === speaker) ?? SARVAM_SPEAKERS[0];
+  const spkObj  = availableVoices.find((v) => v.id === speaker) ?? availableVoices[0];
+  const providerObj = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+  const effectiveProviderObj = PROVIDERS.find((p) => p.id === effectiveProvider) ?? PROVIDERS[1];
+  // Short label for the provider pill — "Auto (Google)" when on Auto, else the plain label.
+  const providerLabel = provider === 'auto'
+    ? `Auto · ${effectiveProviderObj.label}`
+    : providerObj.label;
   const statusLabel =
     phase === 'listening' ? 'Listening'
       : phase === 'thinking' ? 'Thinking'
@@ -646,6 +743,17 @@ export default function VoiceBar() {
             </View>
             <View className="flex-row items-center gap-1.5">
               <Pressable
+                onPress={pickProvider}
+                disabled={phase === 'thinking' || phase === 'speaking'}
+                className="flex-row items-center gap-1 px-2.5 py-1 rounded-full"
+                style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}
+              >
+                <Cpu size={12} color={t.textOnVoiceMuted} />
+                <Text className="text-[11px] font-semibold" style={{ color: t.textOnVoice }}>
+                  {providerLabel}
+                </Text>
+              </Pressable>
+              <Pressable
                 onPress={pickLanguage}
                 disabled={phase === 'thinking'}
                 className="flex-row items-center gap-1 px-2.5 py-1 rounded-full"
@@ -656,17 +764,19 @@ export default function VoiceBar() {
                   {langObj.nativeLabel}
                 </Text>
               </Pressable>
-              <Pressable
-                onPress={pickSpeaker}
-                disabled={phase === 'thinking' || phase === 'speaking'}
-                className="flex-row items-center gap-1 px-2.5 py-1 rounded-full"
-                style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}
-              >
-                <Volume2 size={12} color={t.textOnVoiceMuted} />
-                <Text className="text-[11px] font-semibold" style={{ color: t.textOnVoice }}>
-                  {spkObj.label}
-                </Text>
-              </Pressable>
+              {spkObj && (
+                <Pressable
+                  onPress={pickSpeaker}
+                  disabled={phase === 'thinking' || phase === 'speaking'}
+                  className="flex-row items-center gap-1 px-2.5 py-1 rounded-full"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}
+                >
+                  <Volume2 size={12} color={t.textOnVoiceMuted} />
+                  <Text className="text-[11px] font-semibold" style={{ color: t.textOnVoice }}>
+                    {spkObj.label}
+                  </Text>
+                </Pressable>
+              )}
             </View>
           </View>
 

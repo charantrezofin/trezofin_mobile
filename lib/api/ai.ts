@@ -11,6 +11,7 @@ type ChatOptions = {
   outputLanguage?: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   userContext?: string | null;
+  provider?: string;     // "sarvam" | "google" | "azure"
   signal?: AbortSignal;
 };
 
@@ -19,6 +20,7 @@ type SpeakOptions = {
   pitch?: number;
   pace?: number;
   loudness?: number;
+  provider?: string;     // "sarvam" | "google" | "azure"
   signal?: AbortSignal;
 };
 
@@ -27,7 +29,7 @@ export async function transcribeAudio(
   audioUri: string,
   mimeType: string,
   languageCode: string = 'unknown',
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; provider?: string } = {},
 ): Promise<{ transcribed_text: string; detected_language: string }> {
   const form = new FormData();
   const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('m4a') ? 'm4a' : 'webm';
@@ -38,6 +40,7 @@ export async function transcribeAudio(
     type: mimeType,
   } as unknown as Blob);
   form.append('language_code', languageCode);
+  if (options.provider) form.append('provider', options.provider);
 
   const res = await fetch(`${API_BASE}/api/v1/ai/transcribe`, {
     method: 'POST',
@@ -67,6 +70,7 @@ export async function sendChatMessage(
   if (options.outputLanguage) body.output_language = options.outputLanguage;
   if (options.history?.length) body.history = options.history;
   if (options.userContext) body.user_context = options.userContext;
+  if (options.provider) body.provider = options.provider;
 
   const res = await fetch(`${API_BASE}/api/v1/ai/chat`, {
     method: 'POST',
@@ -95,6 +99,7 @@ export async function speakText(
   if (options.pitch    != null) body.pitch    = options.pitch;
   if (options.pace     != null) body.pace     = options.pace;
   if (options.loudness != null) body.loudness = options.loudness;
+  if (options.provider) body.provider = options.provider;
 
   const res = await fetch(`${API_BASE}/api/v1/ai/speak`, {
     method: 'POST',
