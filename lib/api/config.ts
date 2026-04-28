@@ -11,5 +11,10 @@ const extra = (Constants.expoConfig?.extra ?? {}) as { apiUrl?: string };
  * when testing on a physical phone, or the Android emulator's special
  * 10.0.2.2 -> host mapping.
  */
-export const API_BASE =
+// Strip any trailing slash so callers can safely concatenate
+// `/api/v1/...` without producing `//api/v1/...` (a class of bug we
+// hit on the backend's BSE_BASE_URL once — applying the same fix
+// pre-emptively on the mobile side).
+const _raw =
   process.env.EXPO_PUBLIC_API_URL ?? extra.apiUrl ?? 'http://localhost:8000';
+export const API_BASE = _raw.replace(/\/+$/, '');
